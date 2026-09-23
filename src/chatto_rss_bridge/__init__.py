@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 import httpx
 
-from .chatto import ChattoError
+from .chatto import ChattoError, ReconciliationError
 from .config import Config, ConfigError
 from .rss import FeedError
 from .runner import run_once
@@ -26,7 +26,13 @@ def main(
             first_run=args.first_run,
             clear_feed=args.clear_feed,
         )
-    except (ChattoError, ConfigError, FeedError, StateError) as exc:
+    except (
+        ChattoError,
+        ConfigError,
+        FeedError,
+        ReconciliationError,
+        StateError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(message)

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 
 class StateError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class PendingAttempt:
+    guid: str
+    article_link: str
+    expected_body: str
 
 
 class SeenStore:
@@ -45,14 +53,22 @@ class SeenStore:
         except sqlite3.Error as exc:
             raise StateError("could not read state database") from exc
 
-    def has_pending(self) -> bool:
+    def pending_attempts(self) -> list[PendingAttempt]:
         try:
-            row = self._connection.execute(
-                "SELECT EXISTS(SELECT 1 FROM pending_attempts WHERE status = 'pending')"
-            ).fetchone()
-            return row is not None and bool(row[0])
+            rows = self._connection.execute(
+                "SELECT guid, article_link, expected_body FROM pending_attempts "
+                "WHERE status = 'pending' ORDER BY rowid"
+            ).fetchall()
         except sqlite3.Error as exc:
             raise StateError("could not read state database") from exc
+        attempts = []
+        for guid, article_link, expected_body in rows:
+            if not all(
+                isinstance(value, str) for value in (guid, article_link, expected_body)
+            ):
+                raise StateError("state database contains an invalid pending attempt")
+            attempts.append(PendingAttempt(guid, article_link, expected_body))
+        return attempts
 
     def begin_attempt(self, guid: str, article_link: str, body: str) -> None:
         try:

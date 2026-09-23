@@ -7,8 +7,9 @@ import httpx
 
 from .chatto import RejectedChattoError, post_root_message
 from .config import Config
+from .reconciliation import reconcile_pending
 from .rss import fetch_episodes
-from .state import SeenStore, StateError
+from .state import SeenStore
 
 _BERLIN = ZoneInfo("Europe/Berlin")
 
@@ -36,8 +37,18 @@ def run_once(
 def _run_once(config: Config, client: httpx.Client, *, first_run: bool = False) -> str:
     store = SeenStore(config.state_path)
     try:
-        if store.has_pending():
-            raise StateError("a posting attempt is pending; refusing to send again")
+        for attempt in store.pending_attempts():
+            message_id = reconcile_pending(client, config, attempt)
+            if message_id is None:
+                try:
+                    message_id = post_root_message(
+                        client, config, attempt.expected_body
+                    )
+                except RejectedChattoError:
+                    store.discard_attempt(attempt.guid)
+                    raise
+            store.confirm(attempt.guid, message_id)
+
         episodes = fetch_episodes(client, config.rss_source)
         today = datetime.now(_BERLIN).date() if first_run else None
         posted: list[tuple[str, str]] = []

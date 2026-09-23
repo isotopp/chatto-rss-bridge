@@ -18,7 +18,7 @@ The command reads `.env` from its current directory. If that file is absent, it 
 
 ## Operation
 
-The command validates the feed, then posts unseen items as root messages in publication order, oldest first. HTML in descriptions is rendered as plain text. Confirmed GUIDs and Chatto message IDs are stored in the SQLite database; later runs skip confirmed items. Use `--first-run` to post only items from today in the `Europe/Berlin` time zone while marking other current feed items seen. Use `--clear-feed` by itself to clear stored GUIDs without contacting the feed or Chatto; it refuses while a post attempt is pending. A timeout or invalid confirmation leaves an attempt pending, and later runs stop rather than retrying automatically.
+The command validates the feed, then posts unseen items as root messages in publication order, oldest first. HTML in descriptions is rendered as plain text. Confirmed GUIDs and Chatto message IDs are stored in the SQLite database; later runs skip confirmed items. Use `--first-run` to post only items from today in the `Europe/Berlin` time zone while marking other current feed items seen. Use `--clear-feed` by itself to clear stored GUIDs without contacting the feed or Chatto; it refuses while a post attempt is pending. After a timeout or invalid confirmation, later runs check Chatto search and the room timeline before deciding whether to retry; unavailable or incomplete reads leave the attempt pending.
 
 For development, run:
 

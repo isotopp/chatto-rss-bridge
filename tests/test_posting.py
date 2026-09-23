@@ -19,6 +19,27 @@ RSS_ITEM = """<?xml version="1.0"?>
 """
 
 
+def _seed_pending_attempt(database_path: Path, expected_body: str) -> None:
+    with sqlite3.connect(database_path) as database:
+        database.execute(
+            "CREATE TABLE seen (guid TEXT PRIMARY KEY, chatto_message_id TEXT NOT NULL)"
+        )
+        database.execute("CREATE TABLE skipped (guid TEXT PRIMARY KEY)")
+        database.execute(
+            "CREATE TABLE pending_attempts ("
+            "guid TEXT PRIMARY KEY, article_link TEXT NOT NULL, "
+            "expected_body TEXT NOT NULL, status TEXT NOT NULL)"
+        )
+        database.execute(
+            "INSERT INTO pending_attempts VALUES (?, ?, ?, 'pending')",
+            (
+                "episode-guid-1",
+                "https://www.deutschlandfunk.de/example-episode",
+                expected_body,
+            ),
+        )
+
+
 def test_one_feed_item_is_posted_as_an_authenticated_root_message(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
@@ -299,10 +320,18 @@ def test_lost_chatto_response_stays_pending_and_is_not_reposted(
     def handle(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
             return httpx.Response(200, content=RSS_ITEM)
-        accepted_posts.append(json.loads(request.content))
-        if len(accepted_posts) == 1:
-            raise httpx.ReadTimeout("response lost", request=request)
-        return httpx.Response(200, json={"message": {"id": "duplicate"}})
+        if request.url.path.endswith("ViewerService/GetViewer"):
+            return httpx.Response(200, json={"user": {"profile": {"id": "bot-1"}}})
+        if request.url.path.endswith("MessageSearchService/SearchMessages"):
+            return httpx.Response(503)
+        if request.url.path.endswith("RoomService/GetRoomEvents"):
+            return httpx.Response(403)
+        if request.url.path.endswith("MessageService/CreateMessage"):
+            accepted_posts.append(json.loads(request.content))
+            if len(accepted_posts) == 1:
+                raise httpx.ReadTimeout("response lost", request=request)
+            return httpx.Response(200, json={"message": {"id": "duplicate"}})
+        raise AssertionError("unexpected Chatto request")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: home)
@@ -327,7 +356,331 @@ def test_lost_chatto_response_stays_pending_and_is_not_reposted(
         assert main([], http_client=client) == 1
 
     assert len(accepted_posts) == 1
-    assert "pending" in capsys.readouterr().err
+    assert "HTTP 403" in capsys.readouterr().err
+    with sqlite3.connect(database_path) as database:
+        assert database.execute("SELECT guid FROM pending_attempts").fetchall() == [
+            ("episode-guid-1",)
+        ]
+
+
+def test_pending_attempt_is_confirmed_from_matching_search_result(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    expected_body = (
+        "Presseschau today\n\nA concise summary of today's episode.\n\n"
+        "https://www.deutschlandfunk.de/example-episode"
+    )
+    database_path = tmp_path / ".chatto-rss-bridge.db"
+    _seed_pending_attempt(database_path, expected_body)
+    paths: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("ViewerService/GetViewer"):
+            return httpx.Response(200, json={"user": {"profile": {"id": "bot-1"}}})
+        if request.url.path.endswith("MessageSearchService/SearchMessages"):
+            search_request = json.loads(request.content)
+            assert search_request["roomId"] == "room-1"
+            assert (
+                "https://www.deutschlandfunk.de/example-episode"
+                in search_request["query"]
+            )
+            if "cursor" not in search_request:
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "message": {
+                                    "id": "untrusted-message",
+                                    "roomId": "room-1",
+                                    "actorId": "another-user",
+                                    "body": expected_body,
+                                }
+                            }
+                        ],
+                        "nextCursor": "next-search-page",
+                    },
+                )
+            assert search_request["cursor"] == "next-search-page"
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "message": {
+                                "id": "existing-message-1",
+                                "roomId": "room-1",
+                                "actorId": "bot-1",
+                                "body": expected_body,
+                            }
+                        }
+                    ]
+                },
+            )
+        if request.method == "GET":
+            return httpx.Response(200, content=RSS_ITEM)
+        raise AssertionError("reconciliation must not create a duplicate message")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        assert main([], http_client=client) == 0
+
+    assert paths == [
+        "/api/connect/chatto.api.v1.ViewerService/GetViewer",
+        "/api/connect/chatto.api.v1.MessageSearchService/SearchMessages",
+        "/api/connect/chatto.api.v1.MessageSearchService/SearchMessages",
+        "/presseschau.xml",
+    ]
+    with sqlite3.connect(database_path) as database:
+        confirmed = database.execute(
+            "SELECT guid, chatto_message_id FROM seen"
+        ).fetchall()
+        pending = database.execute("SELECT guid FROM pending_attempts").fetchall()
+    assert confirmed == [("episode-guid-1", "existing-message-1")]
+    assert pending == []
+
+
+def test_timeline_fallback_finds_bot_message_when_search_hit_is_unreliable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    expected_body = (
+        "Presseschau today\n\nA concise summary of today's episode.\n\n"
+        "https://www.deutschlandfunk.de/example-episode"
+    )
+    database_path = tmp_path / ".chatto-rss-bridge.db"
+    _seed_pending_attempt(database_path, expected_body)
+    paths: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("ViewerService/GetViewer"):
+            return httpx.Response(200, json={"user": {"profile": {"id": "bot-1"}}})
+        if request.url.path.endswith("MessageSearchService/SearchMessages"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "message": {
+                                "id": "untrusted-message",
+                                "roomId": "room-1",
+                                "actorId": "another-user",
+                                "body": expected_body,
+                            }
+                        }
+                    ]
+                },
+            )
+        if request.url.path.endswith("RoomService/GetRoomEvents"):
+            return httpx.Response(
+                200,
+                json={
+                    "page": {
+                        "events": [
+                            {
+                                "id": "event-1",
+                                "actorId": "bot-1",
+                                "messagePosted": {
+                                    "message": {
+                                        "id": "timeline-message-1",
+                                        "roomId": "room-1",
+                                        "actorId": "bot-1",
+                                        "body": expected_body,
+                                    }
+                                },
+                            }
+                        ],
+                        "startCursor": "start-1",
+                        "endCursor": "end-1",
+                        "hasOlder": False,
+                        "hasNewer": False,
+                    }
+                },
+            )
+        if request.method == "GET":
+            return httpx.Response(200, content=RSS_ITEM)
+        raise AssertionError("timeline reconciliation must avoid another post")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        assert main([], http_client=client) == 0
+
+    assert paths == [
+        "/api/connect/chatto.api.v1.ViewerService/GetViewer",
+        "/api/connect/chatto.api.v1.MessageSearchService/SearchMessages",
+        "/api/connect/chatto.api.v1.RoomService/GetRoomEvents",
+        "/presseschau.xml",
+    ]
+    with sqlite3.connect(database_path) as database:
+        confirmed = database.execute(
+            "SELECT guid, chatto_message_id FROM seen"
+        ).fetchall()
+        pending = database.execute("SELECT guid FROM pending_attempts").fetchall()
+    assert confirmed == [("episode-guid-1", "timeline-message-1")]
+    assert pending == []
+
+
+def test_reliable_timeline_absence_allows_retry_after_all_pages(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    expected_body = (
+        "Presseschau today\n\nA concise summary of today's episode.\n\n"
+        "https://www.deutschlandfunk.de/example-episode"
+    )
+    database_path = tmp_path / ".chatto-rss-bridge.db"
+    _seed_pending_attempt(database_path, expected_body)
+    paths: list[str] = []
+
+    def unrelated_event(message_id: str) -> dict[str, object]:
+        return {
+            "id": f"event-{message_id}",
+            "actorId": "another-user",
+            "messagePosted": {
+                "message": {
+                    "id": message_id,
+                    "roomId": "room-1",
+                    "actorId": "another-user",
+                    "body": "An unrelated message.",
+                }
+            },
+        }
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("ViewerService/GetViewer"):
+            return httpx.Response(200, json={"user": {"profile": {"id": "bot-1"}}})
+        if request.url.path.endswith("MessageSearchService/SearchMessages"):
+            return httpx.Response(200, json={"results": []})
+        if request.url.path.endswith("RoomService/GetRoomEvents"):
+            payload = json.loads(request.content)
+            if "cursor" not in payload:
+                return httpx.Response(
+                    200,
+                    json={
+                        "page": {
+                            "events": [unrelated_event("recent-message")],
+                            "startCursor": "recent-start",
+                            "endCursor": "recent-end",
+                            "hasOlder": True,
+                            "hasNewer": False,
+                        }
+                    },
+                )
+            assert payload["cursor"] == {"before": "recent-start"}
+            return httpx.Response(
+                200,
+                json={
+                    "page": {
+                        "events": [unrelated_event("old-message")],
+                        "startCursor": "old-start",
+                        "endCursor": "old-end",
+                        "hasOlder": False,
+                        "hasNewer": True,
+                    }
+                },
+            )
+        if request.url.path.endswith("MessageService/CreateMessage"):
+            assert json.loads(request.content)["body"] == expected_body
+            return httpx.Response(200, json={"message": {"id": "retried-message"}})
+        if request.method == "GET":
+            return httpx.Response(200, content=RSS_ITEM)
+        raise AssertionError("unexpected Chatto request")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        assert main([], http_client=client) == 0
+
+    assert paths == [
+        "/api/connect/chatto.api.v1.ViewerService/GetViewer",
+        "/api/connect/chatto.api.v1.MessageSearchService/SearchMessages",
+        "/api/connect/chatto.api.v1.RoomService/GetRoomEvents",
+        "/api/connect/chatto.api.v1.RoomService/GetRoomEvents",
+        "/api/connect/chatto.api.v1.MessageService/CreateMessage",
+        "/presseschau.xml",
+    ]
+    with sqlite3.connect(database_path) as database:
+        confirmed = database.execute(
+            "SELECT guid, chatto_message_id FROM seen"
+        ).fetchall()
+        pending = database.execute("SELECT guid FROM pending_attempts").fetchall()
+    assert confirmed == [("episode-guid-1", "retried-message")]
+    assert pending == []
+
+
+def test_unavailable_search_and_timeline_leave_attempt_pending(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    database_path = tmp_path / ".chatto-rss-bridge.db"
+    _seed_pending_attempt(database_path, "Expected pending body")
+    paths: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("ViewerService/GetViewer"):
+            return httpx.Response(200, json={"user": {"profile": {"id": "bot-1"}}})
+        if request.url.path.endswith("MessageSearchService/SearchMessages"):
+            return httpx.Response(503)
+        if request.url.path.endswith("RoomService/GetRoomEvents"):
+            return httpx.Response(403)
+        raise AssertionError("an inconclusive read must never trigger a post")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        result = main([], http_client=client)
+
+    assert result == 1
+    assert paths == [
+        "/api/connect/chatto.api.v1.ViewerService/GetViewer",
+        "/api/connect/chatto.api.v1.MessageSearchService/SearchMessages",
+        "/api/connect/chatto.api.v1.RoomService/GetRoomEvents",
+    ]
+    assert "HTTP 403" in capsys.readouterr().err
+    with sqlite3.connect(database_path) as database:
+        pending = database.execute("SELECT guid FROM pending_attempts").fetchall()
+        confirmed = database.execute("SELECT guid FROM seen").fetchall()
+    assert pending == [("episode-guid-1",)]
+    assert confirmed == []
 
 
 def test_feed_items_are_posted_oldest_first_with_plain_text_descriptions(
