@@ -17,6 +17,7 @@ class Config:
     room_id: str
     rss_source: str
     chatto_base_url: str
+    state_path: Path
 
     @classmethod
     def load(cls, *, cwd: Path | None = None, home: Path | None = None) -> Config:
@@ -55,7 +56,13 @@ class Config:
         chatto_base_url = cleaned["CHATTO_BASE_URL"].rstrip("/")
         _validate_url("BOT_RSS_SOURCE", rss_source, allow_path=True)
         _validate_url("CHATTO_BASE_URL", chatto_base_url, allow_path=False)
-        return cls(api_key, room_id, rss_source, chatto_base_url)
+        return cls(
+            api_key,
+            room_id,
+            rss_source,
+            chatto_base_url,
+            config_file.with_name(".chatto-rss-bridge.db"),
+        )
 
 
 def _validate_url(name: str, value: str, *, allow_path: bool) -> None:

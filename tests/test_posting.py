@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 
 import httpx
@@ -62,6 +63,74 @@ def test_one_feed_item_is_posted_as_an_authenticated_root_message(
     assert result == 0
     assert [request.method for request in requests] == ["GET", "POST"]
     assert "Presseschau today" in capsys.readouterr().out
+
+
+def test_confirmed_guid_is_persisted_and_only_new_items_are_posted(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    two_items = b"""<?xml version="1.0"?>
+    <rss version="2.0"><channel>
+      <item><title>New episode</title><link>https://example.com/new</link>
+        <description>New summary.</description><guid>new-guid</guid>
+        <pubDate>Thu, 24 Sep 2026 07:05:03 +0200</pubDate></item>
+      <item><title>Old episode</title><link>https://example.com/old</link>
+        <description>Old summary.</description><guid>old-guid</guid>
+        <pubDate>Wed, 23 Sep 2026 07:05:03 +0200</pubDate></item>
+    </channel></rss>"""
+    three_items = two_items.replace(
+        b"<channel>",
+        b"""<channel><item><title>Third episode</title>
+        <link>https://example.com/third</link>
+        <description>Third summary.</description><guid>third-guid</guid>
+        <pubDate>Fri, 25 Sep 2026 07:05:03 +0200</pubDate></item>""",
+        1,
+    )
+    feed = two_items
+    posted_bodies: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, content=feed)
+        posted_bodies.append(json.loads(request.content)["body"])
+        return httpx.Response(
+            200, json={"message": {"id": f"chatto-message-{len(posted_bodies)}"}}
+        )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    def run() -> int:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            return main([], http_client=client)
+
+    assert run() == 0
+    assert run() == 0
+    feed = three_items
+    assert run() == 0
+
+    assert [body.splitlines()[0] for body in posted_bodies] == [
+        "Old episode",
+        "New episode",
+        "Third episode",
+    ]
+    with sqlite3.connect(tmp_path / ".chatto-rss-bridge.db") as database:
+        saved = database.execute(
+            "SELECT guid, chatto_message_id FROM seen ORDER BY rowid"
+        ).fetchall()
+    assert saved == [
+        ("old-guid", "chatto-message-1"),
+        ("new-guid", "chatto-message-2"),
+        ("third-guid", "chatto-message-3"),
+    ]
 
 
 def test_feed_items_are_posted_oldest_first_with_plain_text_descriptions(
@@ -139,6 +208,35 @@ def test_rss_document_without_channel_fails_before_posting(
     assert "channel" in capsys.readouterr().err
 
 
+def test_database_error_fails_before_fetching_or_posting(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".chatto-rss-bridge.db").mkdir()
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=RSS_ITEM)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        result = main([], http_client=client)
+
+    assert result == 1
+    assert requests == []
+    assert "state database" in capsys.readouterr().err
+
+
 def test_item_missing_guid_fails_before_any_feed_item_is_posted(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
@@ -204,6 +302,9 @@ def test_denied_chatto_post_fails_without_claiming_success(
     assert "HTTP 403" in captured.err
     assert "private-test-key" not in captured.out + captured.err
     assert captured.out == ""
+    with sqlite3.connect(tmp_path / ".chatto-rss-bridge.db") as database:
+        saved = database.execute("SELECT guid FROM seen").fetchall()
+    assert saved == []
 
 
 def test_chatto_response_without_message_id_is_not_success(

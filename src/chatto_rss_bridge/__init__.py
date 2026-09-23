@@ -8,6 +8,7 @@ from .chatto import ChattoError
 from .config import Config, ConfigError
 from .rss import FeedError
 from .runner import run_once
+from .state import StateError
 
 
 def main(
@@ -17,7 +18,7 @@ def main(
     parser.parse_args(argv)
     try:
         message = run_once(Config.load(), http_client=http_client)
-    except (ChattoError, ConfigError, FeedError) as exc:
+    except (ChattoError, ConfigError, FeedError, StateError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(message)

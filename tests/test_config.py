@@ -62,6 +62,7 @@ def test_config_uses_home_file_when_working_file_is_absent(tmp_path: Path) -> No
 
     assert config.room_id == "room-1"
     assert config.chatto_base_url == "https://chatto.example"
+    assert config.state_path == home_directory / ".chatto-rss-bridge.db"
 
 
 def test_command_does_not_fill_missing_working_values_from_home(
