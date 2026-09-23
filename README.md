@@ -1,6 +1,6 @@
 # Chatto RSS Bridge
 
-This project will poll the [Deutschlandfunk press review RSS feed](https://www.deutschlandfunk.de/presseschau-120.xml) on a schedule and post items to a Chatto channel using a [Chatto bot account](https://dev-docs.chatto.run/guides/integrations/bot-accounts/). The feed polling, scheduling, and Chatto integration are not implemented yet.
+This project reads the [Deutschlandfunk press review RSS feed](https://www.deutschlandfunk.de/presseschau-120.xml) and posts items to a Chatto channel using a [Chatto bot account](https://dev-docs.chatto.run/guides/integrations/bot-accounts/). The command can be run on a schedule; persistent repeat suppression and systemd setup are still being implemented.
 
 ## Installation
 
@@ -18,7 +18,7 @@ The command reads `.env` from its current directory. If that file is absent, it 
 
 ## Operation
 
-The command fetches and posts a feed containing exactly one item. Multi-item feed handling and repeat suppression are still being implemented.
+The command validates the feed, then posts all items as root messages in publication order, oldest first. HTML in descriptions is rendered as plain text. Persistent repeat suppression is still being implemented.
 
 For development, run:
 
@@ -29,4 +29,4 @@ uv run ty check
 uv run pytest
 ```
 
-The current test covers the starter command. Bot behavior tests will be added as that behavior is defined.
+The tests use controlled RSS and Chatto responses; they do not post to a live channel.
