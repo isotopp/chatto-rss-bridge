@@ -1,5 +1,7 @@
 # Development guide
 
+The instructions before the agent guardrails are shared by human developers and coding agents.
+
 The project language is English. Keep code, tests, documentation, and commit messages in English.
 
 ## For developers
@@ -16,7 +18,7 @@ The project language is English. Keep code, tests, documentation, and commit mes
 - Read the current code and documentation before changing behavior. Keep changes within the requested scope.
 - Update `README.md` when installation, configuration, or operation changes.
 
-## Agent guardrails
+## Agent-only guardrails
 
 - Treat the Chatto API and RSS feed as external interfaces. Verify their current behavior before implementing against them; do not invent endpoints or payloads.
 - Never commit bot credentials, tokens, or local `.env` files. Use a safe example file when configuration is introduced.
