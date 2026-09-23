@@ -59,5 +59,25 @@ class SeenStore:
         except sqlite3.Error as exc:
             raise StateError("could not update state database") from exc
 
+    def clear(self) -> None:
+        try:
+            pending_table = self._connection.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'pending_attempts'"
+            ).fetchone()
+            if pending_table is not None:
+                pending = self._connection.execute(
+                    "SELECT EXISTS(SELECT 1 FROM pending_attempts WHERE status = 'pending')"
+                ).fetchone()
+                if pending is not None and bool(pending[0]):
+                    raise StateError(
+                        "cannot clear feed while a posting attempt is pending"
+                    )
+            with self._connection:
+                self._connection.execute("DELETE FROM seen")
+                self._connection.execute("DELETE FROM skipped")
+        except sqlite3.Error as exc:
+            raise StateError("could not clear state database") from exc
+
     def close(self) -> None:
         self._connection.close()

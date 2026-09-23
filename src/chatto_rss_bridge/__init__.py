@@ -15,11 +15,16 @@ def main(
     argv: Sequence[str] | None = None, *, http_client: httpx.Client | None = None
 ) -> int:
     parser = argparse.ArgumentParser(prog="chatto-rss-bridge")
-    parser.add_argument("--first-run", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--first-run", action="store_true")
+    mode.add_argument("--clear-feed", action="store_true")
     args = parser.parse_args(argv)
     try:
         message = run_once(
-            Config.load(), http_client=http_client, first_run=args.first_run
+            Config.load(),
+            http_client=http_client,
+            first_run=args.first_run,
+            clear_feed=args.clear_feed,
         )
     except (ChattoError, ConfigError, FeedError, StateError) as exc:
         print(f"error: {exc}", file=sys.stderr)

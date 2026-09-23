@@ -17,8 +17,16 @@ def run_once(
     config: Config,
     *,
     first_run: bool = False,
+    clear_feed: bool = False,
     http_client: httpx.Client | None = None,
 ) -> str:
+    if clear_feed:
+        store = SeenStore(config.state_path)
+        try:
+            store.clear()
+        finally:
+            store.close()
+        return "Cleared feed history"
     if http_client is None:
         with httpx.Client(timeout=15.0) as client:
             return _run_once(config, client, first_run=first_run)

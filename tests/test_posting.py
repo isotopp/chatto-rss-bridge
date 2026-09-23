@@ -191,6 +191,97 @@ def test_first_run_posts_only_today_and_marks_older_items_seen(
     assert skipped == [("yesterday",)]
 
 
+def test_clear_feed_resets_state_without_http_and_allows_replay(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    requests: list[str] = []
+    posts = 0
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal posts
+        requests.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, content=RSS_ITEM)
+        posts += 1
+        return httpx.Response(200, json={"message": {"id": f"replay-{posts}"}})
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    database_path = tmp_path / ".chatto-rss-bridge.db"
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        assert main([], http_client=client) == 0
+        with sqlite3.connect(database_path) as database:
+            database.execute("INSERT INTO skipped (guid) VALUES ('deliberate-skip')")
+        requests.clear()
+        assert main(["--clear-feed"], http_client=client) == 0
+        assert requests == []
+        assert database_path.is_file()
+        with sqlite3.connect(database_path) as database:
+            assert database.execute("SELECT guid FROM seen").fetchall() == []
+            assert database.execute("SELECT guid FROM skipped").fetchall() == []
+        assert main([], http_client=client) == 0
+
+    assert requests == ["GET", "POST"]
+    assert posts == 2
+
+
+def test_clear_feed_refuses_pending_attempt_without_http(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    database_path = tmp_path / ".chatto-rss-bridge.db"
+    with sqlite3.connect(database_path) as database:
+        database.execute(
+            "CREATE TABLE seen (guid TEXT PRIMARY KEY, chatto_message_id TEXT NOT NULL)"
+        )
+        database.execute("CREATE TABLE skipped (guid TEXT PRIMARY KEY)")
+        database.execute(
+            "CREATE TABLE pending_attempts (guid TEXT PRIMARY KEY, status TEXT NOT NULL)"
+        )
+        database.execute(
+            "INSERT INTO seen VALUES ('confirmed-guid', 'chatto-message-1')"
+        )
+        database.execute(
+            "INSERT INTO pending_attempts VALUES ('pending-guid', 'pending')"
+        )
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=RSS_ITEM)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        result = main(["--clear-feed"], http_client=client)
+
+    assert result == 1
+    assert requests == []
+    assert "pending" in capsys.readouterr().err
+    with sqlite3.connect(database_path) as database:
+        confirmed = database.execute("SELECT guid FROM seen").fetchall()
+        pending = database.execute("SELECT guid FROM pending_attempts").fetchall()
+    assert confirmed == [("confirmed-guid",)]
+    assert pending == [("pending-guid",)]
+
+
 def test_feed_items_are_posted_oldest_first_with_plain_text_descriptions(
     monkeypatch, tmp_path: Path
 ) -> None:
