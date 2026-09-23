@@ -1,0 +1,22 @@
+# Python and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# uv and development tools
+.venv/
+.pytest_cache/
+.ruff_cache/
+.ty/
+.coverage
+htmlcov/
+
+# Local configuration and editor files
+.env
+.env.*
+!.env.example
+.idea/
+*.iml
+.DS_Store

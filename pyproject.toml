@@ -1,13 +1,27 @@
 [project]
 name = "chatto-rss-bridge"
 version = "0.1.0"
-description = "Add your description here"
+description = "Bridge an RSS feed to a Chatto channel"
 readme = "README.md"
 authors = [
     { name = "Kristian Koehntopp", email = "kris-git@koehntopp.de" }
 ]
 requires-python = ">=3.14"
 dependencies = []
+
+[dependency-groups]
+dev = ["pytest", "ruff", "ty"]
+
+[tool.ruff]
+include = ["src/**/*.py", "tests/**/*.py"]
+src = ["src", "tests"]
+
+[tool.ty.src]
+include = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
 
 [project.scripts]
 chatto-rss-bridge = "chatto_rss_bridge:main"

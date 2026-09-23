@@ -1,2 +1,2 @@
 def main() -> None:
-    print("Hello from chatto-rss-bridge!")
+    print("Chatto RSS Bridge is not implemented yet.")
