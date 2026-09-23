@@ -1,7 +1,9 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, tzinfo
 from pathlib import Path
+from threading import Event, Lock
 from typing import Self
 
 import httpx
@@ -681,6 +683,106 @@ def test_unavailable_search_and_timeline_leave_attempt_pending(
         confirmed = database.execute("SELECT guid FROM seen").fetchall()
     assert pending == [("episode-guid-1",)]
     assert confirmed == []
+
+
+def test_concurrent_runs_serialize_pending_reconciliation_and_posting(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    database_path = tmp_path / ".chatto-rss-bridge.db"
+    _seed_pending_attempt(database_path, "Expected pending body")
+    first_post_entered = Event()
+    release_first_post = Event()
+    second_run_started = Event()
+    second_post_entered = Event()
+    counter_lock = Lock()
+    post_count = 0
+    first_post_accepted = False
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal first_post_accepted, post_count
+        if request.method == "GET":
+            return httpx.Response(200, content=RSS_ITEM)
+        if request.url.path.endswith("ViewerService/GetViewer"):
+            return httpx.Response(200, json={"user": {"profile": {"id": "bot-1"}}})
+        if request.url.path.endswith("MessageSearchService/SearchMessages"):
+            with counter_lock:
+                accepted = first_post_accepted
+            if accepted:
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "message": {
+                                    "id": "recovered-message",
+                                    "roomId": "room-1",
+                                    "actorId": "bot-1",
+                                    "body": "Expected pending body",
+                                }
+                            }
+                        ]
+                    },
+                )
+            return httpx.Response(200, json={"results": []})
+        if request.url.path.endswith("RoomService/GetRoomEvents"):
+            return httpx.Response(
+                200,
+                json={
+                    "page": {
+                        "events": [],
+                        "hasOlder": False,
+                        "hasNewer": False,
+                    }
+                },
+            )
+        if request.url.path.endswith("MessageService/CreateMessage"):
+            with counter_lock:
+                post_count += 1
+                current_post = post_count
+            if current_post == 1:
+                first_post_entered.set()
+                if not release_first_post.wait(timeout=5):
+                    raise AssertionError("test did not release the first post")
+                with counter_lock:
+                    first_post_accepted = True
+                return httpx.Response(503)
+            else:
+                second_post_entered.set()
+            return httpx.Response(
+                200, json={"message": {"id": f"recovered-{current_post}"}}
+            )
+        raise AssertionError("unexpected request")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+
+        def invoke(second: bool = False) -> int:
+            if second:
+                second_run_started.set()
+            return main([], http_client=client)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(invoke)
+            assert first_post_entered.wait(timeout=2)
+            second = executor.submit(invoke, True)
+            assert second_run_started.wait(timeout=2)
+            overlapped = second_post_entered.wait(timeout=0.2)
+            release_first_post.set()
+            results = (first.result(timeout=5), second.result(timeout=5))
+
+    assert not overlapped
+    assert results == (1, 0)
+    assert post_count == 1
 
 
 def test_feed_items_are_posted_oldest_first_with_plain_text_descriptions(

@@ -24,7 +24,8 @@ def run_once(
     if clear_feed:
         store = SeenStore(config.state_path)
         try:
-            store.clear()
+            with store.locked():
+                store.clear()
         finally:
             store.close()
         return "Cleared feed history"
@@ -37,39 +38,45 @@ def run_once(
 def _run_once(config: Config, client: httpx.Client, *, first_run: bool = False) -> str:
     store = SeenStore(config.state_path)
     try:
-        for attempt in store.pending_attempts():
-            message_id = reconcile_pending(client, config, attempt)
-            if message_id is None:
-                try:
-                    message_id = post_root_message(
-                        client, config, attempt.expected_body
-                    )
-                except RejectedChattoError:
-                    store.discard_attempt(attempt.guid)
-                    raise
-            store.confirm(attempt.guid, message_id)
-
-        episodes = fetch_episodes(client, config.rss_source)
-        today = datetime.now(_BERLIN).date() if first_run else None
-        posted: list[tuple[str, str]] = []
-        for episode in episodes:
-            if first_run and episode.published_at.astimezone(_BERLIN).date() != today:
-                if not store.contains(episode.guid):
-                    store.skip(episode.guid)
-                continue
-            if store.contains(episode.guid):
-                continue
-            body = f"{episode.title}\n\n{episode.description}\n\n{episode.link}"
-            store.begin_attempt(episode.guid, episode.link, body)
-            try:
-                message_id = post_root_message(client, config, body)
-            except RejectedChattoError:
-                store.discard_attempt(episode.guid)
-                raise
-            store.confirm(episode.guid, message_id)
-            posted.append((episode.title, message_id))
+        with store.locked():
+            return _run_locked(config, client, store, first_run=first_run)
     finally:
         store.close()
+
+
+def _run_locked(
+    config: Config, client: httpx.Client, store: SeenStore, *, first_run: bool
+) -> str:
+    # ponytail: one lock per database; finer locks only if feeds share state.
+    for attempt in store.pending_attempts():
+        message_id = reconcile_pending(client, config, attempt)
+        if message_id is None:
+            try:
+                message_id = post_root_message(client, config, attempt.expected_body)
+            except RejectedChattoError:
+                store.discard_attempt(attempt.guid)
+                raise
+        store.confirm(attempt.guid, message_id)
+
+    episodes = fetch_episodes(client, config.rss_source)
+    today = datetime.now(_BERLIN).date() if first_run else None
+    posted: list[tuple[str, str]] = []
+    for episode in episodes:
+        if first_run and episode.published_at.astimezone(_BERLIN).date() != today:
+            if not store.contains(episode.guid):
+                store.skip(episode.guid)
+            continue
+        if store.contains(episode.guid):
+            continue
+        body = f"{episode.title}\n\n{episode.description}\n\n{episode.link}"
+        store.begin_attempt(episode.guid, episode.link, body)
+        try:
+            message_id = post_root_message(client, config, body)
+        except RejectedChattoError:
+            store.discard_attempt(episode.guid)
+            raise
+        store.confirm(episode.guid, message_id)
+        posted.append((episode.title, message_id))
 
     if not episodes:
         return "No episodes to post"

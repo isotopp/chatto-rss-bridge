@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import fcntl
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +22,7 @@ class PendingAttempt:
 class SeenStore:
     def __init__(self, path: Path) -> None:
         connection: sqlite3.Connection | None = None
+        self._path = path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             connection = sqlite3.connect(path)
@@ -41,6 +45,26 @@ class SeenStore:
             raise StateError("could not initialize state database") from exc
         assert connection is not None
         self._connection = connection
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        lock_path = self._path.with_name(self._path.name + ".lock")
+        try:
+            lock_file = lock_path.open("a+b")
+        except OSError as exc:
+            raise StateError("could not acquire state lock") from exc
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        except OSError as exc:
+            lock_file.close()
+            raise StateError("could not acquire state lock") from exc
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            finally:
+                lock_file.close()
 
     def contains(self, guid: str) -> bool:
         try:

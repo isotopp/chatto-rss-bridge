@@ -17,6 +17,7 @@ htmlcov/
 .env
 .env.*
 !.env.example
+.chatto-rss-bridge.db*
 .idea/
 *.iml
 .DS_Store
