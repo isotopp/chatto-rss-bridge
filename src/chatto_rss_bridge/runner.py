@@ -5,10 +5,10 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from .chatto import post_root_message
+from .chatto import RejectedChattoError, post_root_message
 from .config import Config
 from .rss import fetch_episodes
-from .state import SeenStore
+from .state import SeenStore, StateError
 
 _BERLIN = ZoneInfo("Europe/Berlin")
 
@@ -36,6 +36,8 @@ def run_once(
 def _run_once(config: Config, client: httpx.Client, *, first_run: bool = False) -> str:
     store = SeenStore(config.state_path)
     try:
+        if store.has_pending():
+            raise StateError("a posting attempt is pending; refusing to send again")
         episodes = fetch_episodes(client, config.rss_source)
         today = datetime.now(_BERLIN).date() if first_run else None
         posted: list[tuple[str, str]] = []
@@ -47,7 +49,12 @@ def _run_once(config: Config, client: httpx.Client, *, first_run: bool = False) 
             if store.contains(episode.guid):
                 continue
             body = f"{episode.title}\n\n{episode.description}\n\n{episode.link}"
-            message_id = post_root_message(client, config, body)
+            store.begin_attempt(episode.guid, episode.link, body)
+            try:
+                message_id = post_root_message(client, config, body)
+            except RejectedChattoError:
+                store.discard_attempt(episode.guid)
+                raise
             store.confirm(episode.guid, message_id)
             posted.append((episode.title, message_id))
     finally:

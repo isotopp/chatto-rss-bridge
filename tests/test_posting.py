@@ -282,6 +282,54 @@ def test_clear_feed_refuses_pending_attempt_without_http(
     assert pending == [("pending-guid",)]
 
 
+def test_lost_chatto_response_stays_pending_and_is_not_reposted(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    accepted_posts: list[dict[str, str]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, content=RSS_ITEM)
+        accepted_posts.append(json.loads(request.content))
+        if len(accepted_posts) == 1:
+            raise httpx.ReadTimeout("response lost", request=request)
+        return httpx.Response(200, json={"message": {"id": "duplicate"}})
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    database_path = tmp_path / ".chatto-rss-bridge.db"
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        assert main([], http_client=client) == 1
+        with sqlite3.connect(database_path) as database:
+            pending = database.execute(
+                "SELECT guid, article_link, expected_body, status FROM pending_attempts"
+            ).fetchall()
+            confirmed = database.execute("SELECT guid FROM seen").fetchall()
+        assert pending == [
+            (
+                "episode-guid-1",
+                "https://www.deutschlandfunk.de/example-episode",
+                accepted_posts[0]["body"],
+                "pending",
+            )
+        ]
+        assert confirmed == []
+        capsys.readouterr()
+        assert main([], http_client=client) == 1
+
+    assert len(accepted_posts) == 1
+    assert "pending" in capsys.readouterr().err
+
+
 def test_feed_items_are_posted_oldest_first_with_plain_text_descriptions(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -453,7 +501,11 @@ def test_denied_chatto_post_fails_without_claiming_success(
     assert captured.out == ""
     with sqlite3.connect(tmp_path / ".chatto-rss-bridge.db") as database:
         saved = database.execute("SELECT guid FROM seen").fetchall()
+        pending = database.execute(
+            "SELECT guid FROM pending_attempts WHERE status = 'pending'"
+        ).fetchall()
     assert saved == []
+    assert pending == []
 
 
 def test_chatto_response_without_message_id_is_not_success(
@@ -483,3 +535,19 @@ def test_chatto_response_without_message_id_is_not_success(
     assert result == 1
     assert "message ID" in captured.err
     assert captured.out == ""
+    with sqlite3.connect(tmp_path / ".chatto-rss-bridge.db") as database:
+        pending = database.execute(
+            "SELECT guid, article_link, expected_body, status FROM pending_attempts"
+        ).fetchall()
+    assert pending == [
+        (
+            "episode-guid-1",
+            "https://www.deutschlandfunk.de/example-episode",
+            """Presseschau today
+
+A concise summary of today's episode.
+
+https://www.deutschlandfunk.de/example-episode""",
+            "pending",
+        )
+    ]
