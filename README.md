@@ -18,7 +18,7 @@ The command reads `.env` from its current directory. If that file is absent, it 
 
 ## Operation
 
-The command currently validates configuration only. Feed fetching and Chatto posting are not implemented yet.
+The command fetches and posts a feed containing exactly one item. Multi-item feed handling and repeat suppression are still being implemented.
 
 For development, run:
 

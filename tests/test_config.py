@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from chatto_rss_bridge import main
+from chatto_rss_bridge.config import Config
 
 
 def test_command_reports_missing_configuration_without_leaking_key(
@@ -45,9 +46,7 @@ def test_command_fails_when_neither_configuration_file_exists(
     assert captured.out == ""
 
 
-def test_command_uses_home_configuration_when_working_file_is_absent(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:
+def test_config_uses_home_file_when_working_file_is_absent(tmp_path: Path) -> None:
     working_directory = tmp_path / "work"
     home_directory = tmp_path / "home"
     working_directory.mkdir()
@@ -59,15 +58,10 @@ def test_command_uses_home_configuration_when_working_file_is_absent(
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
     )
-    monkeypatch.chdir(working_directory)
-    monkeypatch.setattr(Path, "home", lambda: home_directory)
+    config = Config.load(cwd=working_directory, home=home_directory)
 
-    result = main([])
-
-    captured = capsys.readouterr()
-    assert result == 0
-    assert captured.out == "Chatto RSS Bridge is not implemented yet.\n"
-    assert captured.err == ""
+    assert config.room_id == "room-1"
+    assert config.chatto_base_url == "https://chatto.example"
 
 
 def test_command_does_not_fill_missing_working_values_from_home(
