@@ -18,6 +18,9 @@ class SeenStore:
                 "CREATE TABLE IF NOT EXISTS seen "
                 "(guid TEXT PRIMARY KEY, chatto_message_id TEXT NOT NULL)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS skipped (guid TEXT PRIMARY KEY)"
+            )
             connection.commit()
         except (OSError, sqlite3.Error) as exc:
             if connection is not None:
@@ -28,12 +31,12 @@ class SeenStore:
 
     def contains(self, guid: str) -> bool:
         try:
-            return (
-                self._connection.execute(
-                    "SELECT 1 FROM seen WHERE guid = ?", (guid,)
-                ).fetchone()
-                is not None
-            )
+            row = self._connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM seen WHERE guid = ?) "
+                "OR EXISTS(SELECT 1 FROM skipped WHERE guid = ?)",
+                (guid, guid),
+            ).fetchone()
+            return row is not None and bool(row[0])
         except sqlite3.Error as exc:
             raise StateError("could not read state database") from exc
 
@@ -43,6 +46,15 @@ class SeenStore:
                 self._connection.execute(
                     "INSERT INTO seen (guid, chatto_message_id) VALUES (?, ?)",
                     (guid, message_id),
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not update state database") from exc
+
+    def skip(self, guid: str) -> None:
+        try:
+            with self._connection:
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO skipped (guid) VALUES (?)", (guid,)
                 )
         except sqlite3.Error as exc:
             raise StateError("could not update state database") from exc

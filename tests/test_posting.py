@@ -1,10 +1,12 @@
 import json
 import sqlite3
+from datetime import datetime, tzinfo
 from pathlib import Path
+from typing import Self
 
 import httpx
 
-from chatto_rss_bridge import main
+from chatto_rss_bridge import main, runner
 
 RSS_ITEM = """<?xml version="1.0"?>
 <rss version="2.0"><channel><title>Presseschau</title><item>
@@ -131,6 +133,62 @@ def test_confirmed_guid_is_persisted_and_only_new_items_are_posted(
         ("new-guid", "chatto-message-2"),
         ("third-guid", "chatto-message-3"),
     ]
+
+
+def test_first_run_posts_only_today_and_marks_older_items_seen(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> Self:
+            return cls(2026, 10, 25, 12, 0, tzinfo=tz)
+
+    monkeypatch.setattr(runner, "datetime", FixedDateTime)
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-api-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+    # The two current-day episodes fall on either side of Berlin's DST change.
+    feed = b"""<?xml version="1.0"?>
+    <rss version="2.0"><channel>
+      <item><title>Today late</title><link>https://example.com/late</link>
+        <description>Late summary.</description><guid>today-late</guid>
+        <pubDate>Sun, 25 Oct 2026 01:30:00 +0000</pubDate></item>
+      <item><title>Today early</title><link>https://example.com/early</link>
+        <description>Early summary.</description><guid>today-early</guid>
+        <pubDate>Sat, 24 Oct 2026 22:30:00 +0000</pubDate></item>
+      <item><title>Yesterday</title><link>https://example.com/yesterday</link>
+        <description>Yesterday summary.</description><guid>yesterday</guid>
+        <pubDate>Sat, 24 Oct 2026 21:30:00 +0000</pubDate></item>
+    </channel></rss>"""
+    posted_titles: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, content=feed)
+        body = json.loads(request.content)["body"]
+        posted_titles.append(body.splitlines()[0])
+        return httpx.Response(
+            200, json={"message": {"id": f"chatto-message-{len(posted_titles)}"}}
+        )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        assert main(["--first-run"], http_client=client) == 0
+        assert main([], http_client=client) == 0
+
+    assert posted_titles == ["Today early", "Today late"]
+    with sqlite3.connect(tmp_path / ".chatto-rss-bridge.db") as database:
+        confirmed = database.execute("SELECT guid FROM seen ORDER BY rowid").fetchall()
+        skipped = database.execute("SELECT guid FROM skipped").fetchall()
+    assert confirmed == [("today-early",), ("today-late",)]
+    assert skipped == [("yesterday",)]
 
 
 def test_feed_items_are_posted_oldest_first_with_plain_text_descriptions(

@@ -18,7 +18,7 @@ The command reads `.env` from its current directory. If that file is absent, it 
 
 ## Operation
 
-The command validates the feed, then posts unseen items as root messages in publication order, oldest first. HTML in descriptions is rendered as plain text. Confirmed GUIDs and Chatto message IDs are stored in the SQLite database; later runs skip confirmed items.
+The command validates the feed, then posts unseen items as root messages in publication order, oldest first. HTML in descriptions is rendered as plain text. Confirmed GUIDs and Chatto message IDs are stored in the SQLite database; later runs skip confirmed items. Use `--first-run` to post only items from today in the `Europe/Berlin` time zone while marking other current feed items seen.
 
 For development, run:
 
