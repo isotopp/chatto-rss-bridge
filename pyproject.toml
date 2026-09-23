@@ -7,7 +7,9 @@ authors = [
     { name = "Kristian Koehntopp", email = "kris-git@koehntopp.de" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "python-dotenv>=1.2.3",
+]
 
 [dependency-groups]
 dev = ["pytest", "ruff", "ty"]

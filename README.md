@@ -14,11 +14,11 @@ The project requires Python 3.14 or newer. `uv sync` installs the project and it
 
 ## Configuration
 
-No runtime configuration is defined yet. A future bot will need feed, schedule, and Chatto channel settings and bot credentials. Keep credentials out of the repository.
+The command reads `.env` from its current directory. If that file is absent, it reads `~/.chatto-rss-bridge.env`; if neither exists or a required value is missing, it exits with an error. The required values are `BOT_API_KEY`, `BOT_ROOM_ID`, `BOT_RSS_SOURCE`, and `CHATTO_BASE_URL`. See [sample.env](sample.env) for the shape of the file, and keep real credentials out of the repository.
 
 ## Operation
 
-There is no operational bot yet. The current `uv run chatto-rss-bridge` command is a starter placeholder and does not fetch or post anything.
+The command currently validates configuration only. Feed fetching and Chatto posting are not implemented yet.
 
 For development, run:
 
