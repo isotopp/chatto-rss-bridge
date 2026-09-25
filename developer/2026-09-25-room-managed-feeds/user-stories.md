@@ -24,9 +24,9 @@ without broad admin access. If it cannot, use a local whitelist managed by
 `@bot adduser <username>`, `@bot listuser`, and
 `@bot deleteuser <username>`. `BOT_OPERATOR_NAME` in the env file identifies
 the first trusted user in whitelist mode. Resolve that name to a stable Chatto
-user ID and seed the whitelist on first startup. 
-A failed or ambiguous resolution prevents startup in that mode.
-The env value is a bootstrap seed; protect that user ID from deletion.
+user ID and seed the whitelist on first startup. A failed or ambiguous
+resolution prevents startup in that mode. The env value is a bootstrap seed;
+protect the bot owner's user ID recorded at initial setup from deletion.
 
 ## US-1: Listen for room commands
 
@@ -66,8 +66,9 @@ Acceptance criteria:
 - In whitelist mode, `BOT_OPERATOR_NAME` seeds the first trusted ID from the
   env file on first startup. Startup fails if it cannot be resolved
   unambiguously. Subsequent username changes do not silently transfer access.
-- `deleteuser` cannot remove the final trusted user. A failed authorization
-  check grants no access.
+- `deleteuser` cannot remove the bot owner's user ID recorded at initial
+  setup, even if bot ownership later changes. Other trusted users may be
+  removed. A failed authorization check grants no access.
 
 ## US-3: Add a feed with an initial proof post
 
