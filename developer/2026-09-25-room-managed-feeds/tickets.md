@@ -2,24 +2,22 @@
 
 This plan implements the approved [user stories](user-stories.md) in order.
 Each code ticket starts with a failing behavior test and ends with the project
-checks. Implementation waits for approval of this ticket plan.
+checks.
 
-## 1. Verify the deployed Chatto integration contract
+## 1. Verify the deployed mention and reply contract
 
 Behavior and public interface:
 
 - Establish, using the deployed Chatto version or its matching API schema,
   how a bot receives direct-mention events, obtains the mentioned message and
   sender ID, and posts a reply in the command's thread.
-- Test whether the bot credential can check a sender's current membership in
-  `BOT_BRIDGE_ROLE` without broad admin access. Record the exact call and
-  required permission, or record why it is unavailable.
-- Select role mode when that check is available; otherwise select whitelist
-  mode. Record the verified request and response shapes as controlled test
-  fixtures before later tickets depend on them.
+- Record the verified request and response shapes as controlled test fixtures
+  before later tickets depend on them.
 
-Done when the authorization mode and listener/reply API are evidenced in this
-epic, rather than inferred from endpoint names.
+Done when the listener/reply API is evidenced in this epic, rather than
+inferred from endpoint names. Role lookup is already verified: the deployed
+bot API key can call `UserService/GetUser` and read `user.roles` without an
+admin permission.
 
 ## 2. Persist named feeds and feed-scoped delivery state
 
@@ -83,20 +81,15 @@ no live Chatto connection.
 
 Behavior and public interface:
 
-- `add`, `list`, and `delete` fail closed unless the sender has current
-  `BOT_BRIDGE_ROLE` membership through the verified API from ticket 1, or a
-  stored whitelist entry in fallback mode.
-- In whitelist mode, `BOT_OPERATOR_NAME` resolves to a stable Chatto user ID
-  at first startup, and the bot owner's user ID recorded at initial setup is
-  protected from `deleteuser`, even if ownership later changes.
-- In whitelist mode, trusted senders can run `adduser <username>`, `listuser`,
-  and `deleteuser <username>`. Usernames resolve to stable IDs; missing or
-  ambiguous names fail. Any other trusted user can be removed.
-- The chosen mode and its commands are visible in `help`. An unavailable role
-  check never falls through to an unverified allow.
+- `add`, `list`, and `delete` require the sender's current membership in the
+  role named by `BOT_BRIDGE_ROLE`.
+- The handler calls `UserService/GetUser` with the message sender's stable
+  user ID and requires an exact role-name match in `user.roles`.
+- Missing users or roles, malformed responses, and failed lookups deny the
+  command. `help` remains available to room members.
 
-Done when allowed, denied, lookup-error, and protected-owner cases pass using
-controlled API responses.
+Done when allowed, denied, and lookup-error cases pass using controlled API
+responses.
 
 ## 7. Run a reconnecting listener and feed scheduler
 
@@ -116,9 +109,8 @@ and avoid repeated commands.
 
 Behavior and public interface:
 
-- `sample.env` and `README.md` describe the new configuration, role or
-  whitelist mode, `BOT_OPERATOR_NAME` bootstrap, room commands, manual
-  Presseschau add, and a restartable systemd service without a timer.
+- `sample.env` and `README.md` describe `BOT_BRIDGE_ROLE`, room commands,
+  manual Presseschau add, and a restartable systemd service without a timer.
 - Old one-shot flags and `BOT_RSS_SOURCE` are removed from the documented
   operator path when the long-running service replaces them.
 - The documented setup requires only the permissions confirmed in ticket 1.
@@ -126,7 +118,7 @@ Behavior and public interface:
 Done when an operator can install, start, and inspect the service from the
 README without guessing its configuration or handling secrets in logs.
 
-## Proposed re-add policy for approval
+## Re-add policy
 
 Deleting a feed removes its active definition and confirmed history after any
 pending post has been reconciled. Re-adding the same name is a new add: it

@@ -18,15 +18,10 @@ to prove that the feed works, marks every article in that initial snapshot as
 seen, and subsequently posts only new articles. Each feed has its own polling
 interval and delivery history.
 
-The preferred authorization rule is current membership in the Chatto role
-configured by `BOT_BRIDGE_ROLE`, if the deployed API lets a bot check that
-without broad admin access. If it cannot, use a local whitelist managed by
-`@bot adduser <username>`, `@bot listuser`, and
-`@bot deleteuser <username>`. `BOT_OPERATOR_NAME` in the env file identifies
-the first trusted user in whitelist mode. Resolve that name to a stable Chatto
-user ID and seed the whitelist on first startup. A failed or ambiguous
-resolution prevents startup in that mode. The env value is a bootstrap seed;
-protect the bot owner's user ID recorded at initial setup from deletion.
+Management commands require current membership in the Chatto role named by
+`BOT_BRIDGE_ROLE`. The bot checks the message sender's stable user ID through
+`UserService/GetUser` and reads the returned `user.roles`. This read was
+verified with the deployed bot API key without admin permission.
 
 ## US-1: Listen for room commands
 
@@ -52,23 +47,13 @@ set so that room membership alone does not grant control.
 
 Acceptance criteria:
 
-- `add`, `list`, and `delete` require the sender's current membership in
-  `BOT_BRIDGE_ROLE` when that membership can be checked with suitable bot
-  permissions. The check uses the sender's Chatto user ID, not text in the
-  message.
-- If the deployed Chatto API cannot perform that check without broad admin
-  access, the bridge uses its local whitelist instead. `adduser`, `listuser`,
-  and `deleteuser` exist only in this mode and require an already trusted
-  sender.
-- The whitelist stores stable user IDs. Usernames supplied to `adduser` and
-  `deleteuser` are resolved against Chatto; missing or ambiguous identities
-  are rejected.
-- In whitelist mode, `BOT_OPERATOR_NAME` seeds the first trusted ID from the
-  env file on first startup. Startup fails if it cannot be resolved
-  unambiguously. Subsequent username changes do not silently transfer access.
-- `deleteuser` cannot remove the bot owner's user ID recorded at initial
-  setup, even if bot ownership later changes. Other trusted users may be
-  removed. A failed authorization check grants no access.
+- `add`, `list`, and `delete` require the sender's current membership in the
+  role named by `BOT_BRIDGE_ROLE`.
+- The bot calls `UserService/GetUser` with the sender's stable Chatto user ID
+  and requires an exact match in the returned `user.roles`; message text and
+  usernames do not establish authorization.
+- A missing role, missing user, malformed response, or failed lookup denies
+  the command. Role assignment and revocation take effect on the next check.
 
 ## US-3: Add a feed with an initial proof post
 
@@ -117,8 +102,9 @@ Acceptance criteria:
 - `list` reports each saved feed's name, URL, and polling interval.
 - `delete <feedname>` stops future checks of that feed and confirms the
   result. An unknown name produces a useful error.
-- Delivery history is retained or retired according to the agreed re-add
-  policy below; deleting one feed never affects another feed.
+- `delete` refuses while a post for that feed remains uncertain. Otherwise it
+  removes the feed definition and confirmed history. Re-adding the name makes
+  a new proof post. Deleting one feed never affects another feed.
 
 ## US-6: Run as an unattended service
 
@@ -134,17 +120,12 @@ Acceptance criteria:
   restarts.
 - systemd restarts a failed process; no timer unit is required for feed
   checks. Shutdown closes network and database resources cleanly.
-- Operator documentation explains bot permissions, configuration, bootstrap,
-  commands, polling, failure recovery, and the manual addition of the
-  Presseschau feed.
+- Operator documentation explains bot permissions, configuration, commands,
+  polling, failure recovery, and the manual addition of the Presseschau feed.
 - Automated tests use controlled Chatto and RSS responses and never post to a
   live room or start a live service.
 
-## Feasibility and planning questions
+## Remaining integration check
 
-- Verify the deployed Chatto API's direct-mention event shape, role-membership
-  lookup and required permissions, and reply API before choosing the listener
-  and authorization mode. Do not infer role membership from a username or
-  message text.
-- Decide how re-adding a deleted feed name or URL treats retained history and
-  the required proof post.
+- Verify the deployed Chatto API's direct-mention event shape and reply API
+  before implementing the listener.
