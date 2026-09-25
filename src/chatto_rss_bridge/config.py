@@ -18,6 +18,7 @@ class Config:
     rss_source: str
     chatto_base_url: str
     state_path: Path
+    bot_bridge_role: str
 
     @classmethod
     def load(cls, *, cwd: Path | None = None, home: Path | None = None) -> Config:
@@ -39,6 +40,7 @@ class Config:
         required = {
             "BOT_API_KEY": values.get("BOT_API_KEY"),
             "BOT_ROOM_ID": values.get("BOT_ROOM_ID"),
+            "BOT_BRIDGE_ROLE": values.get("BOT_BRIDGE_ROLE"),
             "BOT_RSS_SOURCE": values.get("BOT_RSS_SOURCE"),
             "CHATTO_BASE_URL": values.get("CHATTO_BASE_URL"),
         }
@@ -52,6 +54,7 @@ class Config:
             raise ConfigError(f"missing required configuration: {', '.join(missing)}")
         api_key = cleaned["BOT_API_KEY"]
         room_id = cleaned["BOT_ROOM_ID"]
+        bot_bridge_role = cleaned["BOT_BRIDGE_ROLE"]
         rss_source = cleaned["BOT_RSS_SOURCE"]
         chatto_base_url = cleaned["CHATTO_BASE_URL"].rstrip("/")
         _validate_url("BOT_RSS_SOURCE", rss_source, allow_path=True)
@@ -62,6 +65,7 @@ class Config:
             rss_source,
             chatto_base_url,
             config_file.with_name(".chatto-rss-bridge.db"),
+            bot_bridge_role,
         )
 
 

@@ -12,6 +12,17 @@ from chatto_rss_bridge.state import FeedStore
 FEED_URL = "https://feed.example.test/news.xml"
 
 
+def _role_response(
+    request: httpx.Request, roles: list[str] | None = None
+) -> httpx.Response | None:
+    if request.url.path.endswith("UserService/GetUser"):
+        return httpx.Response(
+            200,
+            json={"user": {"roles": ["rss-bot-operator"] if roles is None else roles}},
+        )
+    return None
+
+
 def _config(path: Path) -> Config:
     return Config(
         api_key="test-api-key",
@@ -19,6 +30,7 @@ def _config(path: Path) -> Config:
         rss_source="https://legacy.example.test/feed.xml",
         chatto_base_url="https://chatto.example.test",
         state_path=path,
+        bot_bridge_role="rss-bot-operator",
     )
 
 
@@ -50,6 +62,9 @@ def test_list_command_replies_in_the_message_thread(tmp_path: Path) -> None:
 
     def handle(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        role_response = _role_response(request)
+        if role_response is not None:
+            return role_response
         return httpx.Response(200, json={"message": {"id": "reply-message-id"}})
 
     store = FeedStore(tmp_path / "state.db")
@@ -62,8 +77,10 @@ def test_list_command_replies_in_the_message_thread(tmp_path: Path) -> None:
             )
 
         assert handled is True
-        assert len(requests) == 1
-        request = requests[0]
+        assert len(requests) == 2
+        assert requests[0].url.path.endswith("UserService/GetUser")
+        assert json.loads(requests[0].content)["userId"] == "operator-user"
+        request = requests[1]
         assert (
             request.url.path
             == "/api/connect/chatto.api.v1.MessageService/CreateMessage"
@@ -76,6 +93,76 @@ def test_list_command_replies_in_the_message_thread(tmp_path: Path) -> None:
         assert "briefing" in reply["body"]
         assert "https://feed.example.test/rss" in reply["body"]
         assert "20" in reply["body"]
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    ("status_code", "body", "expected"),
+    [
+        (200, {"user": {"roles": []}}, "requires the rss-bot-operator role"),
+        (
+            200,
+            {"user": {"roles": ["other-role"]}},
+            "requires the rss-bot-operator role",
+        ),
+        (200, {"user": {"roles": "rss-bot-operator"}}, "Could not verify your role"),
+        (403, {}, "Could not verify your role"),
+    ],
+)
+def test_feed_commands_are_denied_without_verified_operator_role(
+    tmp_path: Path, status_code: int, body: dict[str, object], expected: str
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("UserService/GetUser"):
+            return httpx.Response(status_code, json=body)
+        return httpx.Response(200, json={"message": {"id": "reply-id"}})
+
+    store = FeedStore(tmp_path / "state.db")
+    store.add_feed("briefing", "https://feed.example.test/rss", 20)
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert handle_message(
+                client,
+                _config(tmp_path / "state.db"),
+                store,
+                bot_user_id="bot-user",
+                event=_body_event("@rss-bot delete briefing"),
+            )
+
+        assert len(requests) == 2
+        assert requests[0].url.path.endswith("UserService/GetUser")
+        assert json.loads(requests[0].content) == {"userId": "operator-user"}
+        assert requests[1].url.path.endswith("MessageService/CreateMessage")
+        reply = json.loads(requests[1].content)
+        assert expected in reply["body"]
+        assert store.list_feeds()[0].name == "briefing"
+    finally:
+        store.close()
+
+
+def test_help_does_not_require_or_query_operator_role(tmp_path: Path) -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"message": {"id": "reply-id"}})
+
+    store = FeedStore(tmp_path / "state.db")
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert handle_message(
+                client,
+                _config(tmp_path / "state.db"),
+                store,
+                bot_user_id="bot-user",
+                event=_body_event("@rss-bot help"),
+            )
+        assert len(requests) == 1
+        assert requests[0].url.path.endswith("MessageService/CreateMessage")
     finally:
         store.close()
 
@@ -191,6 +278,9 @@ def test_delete_command_removes_feed_and_reports_unknown_name(tmp_path: Path) ->
     replies: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
+        role_response = _role_response(request)
+        if role_response is not None:
+            return role_response
         replies.append(json.loads(request.content)["body"])
         return httpx.Response(200, json={"message": {"id": f"reply-{len(replies)}"}})
 
@@ -228,6 +318,9 @@ def test_add_command_posts_proof_then_replies_in_command_thread(tmp_path: Path) 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
             return httpx.Response(200, content=feed_xml)
+        role_response = _role_response(request)
+        if role_response is not None:
+            return role_response
         body = json.loads(request.content)
         requests.append(body)
         message_id = "reply-id" if "threadRootEventId" in body else "proof-id"
@@ -260,6 +353,9 @@ def test_delete_command_refuses_feed_with_uncertain_post(tmp_path: Path) -> None
     replies: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
+        role_response = _role_response(request)
+        if role_response is not None:
+            return role_response
         replies.append(json.loads(request.content)["body"])
         return httpx.Response(200, json={"message": {"id": "reply-id"}})
 
@@ -299,6 +395,9 @@ def test_commands_require_exact_argument_counts(
     replies: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
+        role_response = _role_response(request)
+        if role_response is not None:
+            return role_response
         replies.append(json.loads(request.content)["body"])
         return httpx.Response(200, json={"message": {"id": "reply-id"}})
 

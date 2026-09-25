@@ -115,6 +115,11 @@ Behavior and public interface:
 Done when allowed, denied, and lookup-error cases pass using controlled API
 responses.
 
+Completed: `BOT_BRIDGE_ROLE` is required configuration. `add`, `list`, and
+`delete` look up the sender by stable user ID on every command and require an
+exact role match; absent roles, malformed responses, and failed lookups deny
+the command. `help` remains available without a role lookup.
+
 ## 7. Run a reconnecting listener and feed scheduler
 
 Behavior and public interface:

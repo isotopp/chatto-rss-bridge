@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from .chatto import ChattoError, post_reply_message
+from .chatto import AuthorizationError, ChattoError, get_user_roles, post_reply_message
 from .config import Config
 from .feed_service import add_feed
 from .rss import FeedError
@@ -26,8 +26,19 @@ def handle_message(
     if command is None:
         return False
 
-    event_id, message, name, args = command
-    reply_body = _execute(client, config, store, name, args)
+    event_id, actor_id, message, name, args = command
+    if name in {"add", "list", "delete"}:
+        try:
+            roles = get_user_roles(client, config, actor_id)
+        except AuthorizationError:
+            reply_body = "Could not verify your role; command denied."
+        else:
+            if config.bot_bridge_role not in roles:
+                reply_body = f"This command requires the {config.bot_bridge_role} role."
+            else:
+                reply_body = _execute(client, config, store, name, args)
+    else:
+        reply_body = _execute(client, config, store, name, args)
     thread_root = message.get("threadRootEventId")
     if not isinstance(thread_root, str) or not thread_root:
         thread_root = event_id
@@ -43,7 +54,7 @@ def handle_message(
 
 def _command_from_event(
     event: dict[str, Any], room_id: str, bot_user_id: str
-) -> tuple[str, dict[str, Any], str, list[str]] | None:
+) -> tuple[str, str, dict[str, Any], str, list[str]] | None:
     message = event.get("messagePosted")
     if (
         not isinstance(message, dict)
@@ -82,8 +93,8 @@ def _command_from_event(
     if parts and parts[0].startswith("@"):
         parts = parts[1:]
     if not parts:
-        return event_id, message, "", []
-    return event_id, message, parts[0].casefold(), parts[1:]
+        return event_id, actor_id, message, "", []
+    return event_id, actor_id, message, parts[0].casefold(), parts[1:]
 
 
 def _execute(

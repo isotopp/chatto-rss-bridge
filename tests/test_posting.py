@@ -50,6 +50,7 @@ def test_one_feed_item_is_posted_as_an_authenticated_root_message(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -98,6 +99,7 @@ def test_confirmed_guid_is_persisted_and_only_new_items_are_posted(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -172,6 +174,7 @@ def test_first_run_posts_only_today_and_marks_older_items_seen(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -222,6 +225,7 @@ def test_clear_feed_resets_state_without_http_and_allows_replay(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -265,6 +269,7 @@ def test_clear_feed_refuses_pending_attempt_without_http(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -313,6 +318,7 @@ def test_lost_chatto_response_stays_pending_and_is_not_reposted(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -373,6 +379,7 @@ def test_pending_attempt_is_confirmed_from_matching_search_result(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -461,6 +468,7 @@ def test_timeline_fallback_finds_bot_message_when_search_hit_is_unreliable(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -551,6 +559,7 @@ def test_reliable_timeline_absence_allows_retry_after_all_pages(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -648,6 +657,7 @@ def test_unavailable_search_and_timeline_leave_attempt_pending(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -693,6 +703,7 @@ def test_concurrent_runs_serialize_pending_reconciliation_and_posting(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -793,6 +804,7 @@ def test_feed_items_are_posted_oldest_first_with_plain_text_descriptions(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -838,6 +850,7 @@ def test_rss_document_without_channel_fails_before_posting(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -868,6 +881,7 @@ def test_database_error_fails_before_fetching_or_posting(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -897,6 +911,7 @@ def test_item_missing_guid_fails_before_any_feed_item_is_posted(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -934,6 +949,7 @@ def test_denied_chatto_post_fails_without_claiming_success(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=private-test-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",
@@ -971,6 +987,7 @@ def test_chatto_response_without_message_id_is_not_success(
     (tmp_path / ".env").write_text(
         "BOT_API_KEY=test-api-key\n"
         "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
         "BOT_RSS_SOURCE=https://feed.example/presseschau.xml\n"
         "CHATTO_BASE_URL=https://chatto.example\n",
         encoding="utf-8",

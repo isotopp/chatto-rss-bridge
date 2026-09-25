@@ -30,6 +30,7 @@ def _config(path: Path) -> Config:
         rss_source="https://legacy.example.test/feed.xml",
         chatto_base_url="https://chatto.example.test",
         state_path=path,
+        bot_bridge_role="rss-bot-operator",
     )
 
 

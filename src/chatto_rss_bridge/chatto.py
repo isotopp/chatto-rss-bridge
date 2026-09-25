@@ -23,6 +23,10 @@ class ReconciliationError(RuntimeError):
     pass
 
 
+class AuthorizationError(ChattoError):
+    pass
+
+
 def _read_connect_json(
     client: httpx.Client, config: Config, method: str, payload: dict[str, object]
 ) -> dict[str, Any]:
@@ -56,6 +60,23 @@ def get_viewer_id(client: httpx.Client, config: Config) -> str:
     if not isinstance(user_id, str) or not user_id:
         raise ReconciliationError("Chatto viewer response did not contain a user ID")
     return user_id
+
+
+def get_user_roles(client: httpx.Client, config: Config, user_id: str) -> list[str]:
+    try:
+        result = _read_connect_json(
+            client,
+            config,
+            "UserService/GetUser",
+            {"userId": user_id},
+        )
+    except ReconciliationError as exc:
+        raise AuthorizationError("could not verify user role") from exc
+    user = result.get("user")
+    roles = user.get("roles", []) if isinstance(user, dict) else None
+    if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
+        raise AuthorizationError("Chatto returned an invalid user role response")
+    return roles
 
 
 def search_messages(
