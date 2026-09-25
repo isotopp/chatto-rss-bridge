@@ -1,0 +1,17 @@
+{
+  "event": {
+    "id": "command-message-id",
+    "actorId": "operator-user-id",
+    "messagePosted": {
+      "roomId": "configured-room-id",
+      "roomKind": "ROOM_KIND_CHANNEL",
+      "bodyPlaintext": "@rss-bot list",
+      "mentions": [
+        {
+          "direct": {"userId": "bot-user-id"},
+          "includesViewer": true
+        }
+      ]
+    }
+  }
+}

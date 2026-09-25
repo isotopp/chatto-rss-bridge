@@ -1,0 +1,16 @@
+{
+  "request": {
+    "roomId": "configured-room-id",
+    "body": "No feeds configured.",
+    "threadRootEventId": "command-message-id",
+    "inReplyTo": "command-message-id"
+  },
+  "response": {
+    "message": {
+      "id": "reply-message-id",
+      "roomId": "configured-room-id",
+      "threadRootEventId": "command-message-id",
+      "inReplyTo": "command-message-id"
+    }
+  }
+}

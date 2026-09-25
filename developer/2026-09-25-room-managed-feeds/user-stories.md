@@ -125,7 +125,8 @@ Acceptance criteria:
 - Automated tests use controlled Chatto and RSS responses and never post to a
   live room or start a live service.
 
-## Remaining integration check
+## Integration contract
 
-- Verify the deployed Chatto API's direct-mention event shape and reply API
-  before implementing the listener.
+The deployed version, authenticated realtime subscription, direct-mention
+event schema, and thread reply request/response are recorded in
+[integration-contract.md](integration-contract.md).

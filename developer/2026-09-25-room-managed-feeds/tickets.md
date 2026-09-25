@@ -14,10 +14,12 @@ Behavior and public interface:
 - Record the verified request and response shapes as controlled test fixtures
   before later tickets depend on them.
 
-Done when the listener/reply API is evidenced in this epic, rather than
-inferred from endpoint names. Role lookup is already verified: the deployed
-bot API key can call `UserService/GetUser` and read `user.roles` without an
-admin permission.
+Completed in [integration-contract.md](integration-contract.md), with
+synthetic controlled fixtures in `tests/fixtures/chatto_direct_mention.json`
+and `tests/fixtures/chatto_thread_reply.json`. The deployed server reports
+`0.5.0-beta.6` and accepted an authenticated, read-only realtime subscription.
+Role lookup is already verified: the deployed bot API key can call
+`UserService/GetUser` and read `user.roles` without an admin permission.
 
 ## 2. Persist named feeds and feed-scoped delivery state
 
