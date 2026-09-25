@@ -91,6 +91,8 @@ bot posts its most recent article to confirm the feed works, marks the articles
 in that initial snapshot as seen, and then posts only new articles. Each feed
 has its own interval and delivery history. Add the Presseschau manually with
 the command above; its existing history is not migrated.
+Posts contain the title, optional description, and link. Items without a
+description are posted as a title and link.
 
 If an add's proof post has an uncertain response, repeat the same `add`
 command. The bridge reconciles the pending post before retrying and does not

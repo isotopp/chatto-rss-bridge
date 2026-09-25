@@ -68,7 +68,9 @@ def _run_locked(
             continue
         if store.contains(episode.guid):
             continue
-        body = f"{episode.title}\n\n{episode.description}\n\n{episode.link}"
+        body = "\n\n".join(
+            filter(None, (episode.title, episode.description, episode.link))
+        )
         store.begin_attempt(episode.guid, episode.link, body)
         try:
             message_id = post_root_message(client, config, body)

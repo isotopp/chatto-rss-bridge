@@ -44,7 +44,9 @@ def add_feed(
         if not episodes:
             raise FeedError("RSS feed contains no articles")
         latest = max(episodes, key=lambda episode: episode.published_at)
-        body = f"{latest.title}\n\n{latest.description}\n\n{latest.link}"
+        body = "\n\n".join(
+            filter(None, (latest.title, latest.description, latest.link))
+        )
         attempt = FeedPendingAttempt(name, latest.guid, latest.link, body)
         store.prepare_feed(
             name,
@@ -106,7 +108,9 @@ def _check_feed(
     for episode in fetch_episodes(client, feed.url):
         if store.contains(feed.name, episode.guid):
             continue
-        body = f"{episode.title}\n\n{episode.description}\n\n{episode.link}"
+        body = "\n\n".join(
+            filter(None, (episode.title, episode.description, episode.link))
+        )
         store.begin_attempt(feed.name, episode.guid, episode.link, body)
         try:
             message_id = post_root_message(client, config, body)

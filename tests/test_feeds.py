@@ -68,6 +68,33 @@ def test_adding_feed_posts_newest_item_and_marks_initial_snapshot_seen(
         store.close()
 
 
+def test_feed_item_without_description_posts_title_and_link(tmp_path: Path) -> None:
+    feed = FEED_XML.replace(b"<description>Newest summary.</description>", b"")
+    posted_bodies: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, content=feed)
+        posted_bodies.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={"message": {"id": "proof-message-id"}})
+
+    store = FeedStore(tmp_path / "state.db")
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            add_feed(
+                client,
+                _config(tmp_path / "state.db"),
+                store,
+                name="briefing",
+                url=FEED_URL,
+                interval_minutes=15,
+            )
+        assert posted_bodies == ["Newest article\n\nhttps://example.test/new"]
+        assert store.contains("briefing", "new-guid")
+    finally:
+        store.close()
+
+
 @pytest.mark.parametrize(
     ("name", "url", "interval_minutes", "body"),
     [

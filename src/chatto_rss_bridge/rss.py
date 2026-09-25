@@ -92,7 +92,9 @@ def fetch_episodes(client: httpx.Client, source: str) -> list[Episode]:
             for name, value in values.items()
             if isinstance(value, str) and value.strip()
         }
-        missing = [name for name in values if name not in cleaned]
+        missing = [
+            name for name in values if name != "description" and name not in cleaned
+        ]
         if missing:
             raise FeedError(
                 f"RSS item is missing required fields: {', '.join(missing)}"
@@ -110,7 +112,7 @@ def fetch_episodes(client: httpx.Client, source: str) -> list[Episode]:
                 guid=cleaned["guid"],
                 title=cleaned["title"],
                 published_at=published_at,
-                description=_plain_text(cleaned["description"]),
+                description=_plain_text(cleaned.get("description", "")),
                 link=cleaned["link"],
             )
         )
