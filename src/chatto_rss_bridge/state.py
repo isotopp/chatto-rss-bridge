@@ -12,6 +12,29 @@ class StateError(RuntimeError):
     pass
 
 
+class FeedExistsError(StateError):
+    pass
+
+
+class FeedNotFoundError(StateError):
+    pass
+
+
+@dataclass(frozen=True)
+class Feed:
+    name: str
+    url: str
+    interval_minutes: int
+
+
+@dataclass(frozen=True)
+class FeedPendingAttempt:
+    feed_name: str
+    guid: str
+    article_link: str
+    expected_body: str
+
+
 @dataclass(frozen=True)
 class PendingAttempt:
     guid: str
@@ -156,6 +179,186 @@ class SeenStore:
                 self._connection.execute("DELETE FROM skipped")
         except sqlite3.Error as exc:
             raise StateError("could not clear state database") from exc
+
+    def close(self) -> None:
+        self._connection.close()
+
+
+class FeedStore:
+    def __init__(self, path: Path) -> None:
+        connection: sqlite3.Connection | None = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(path)
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS feeds ("
+                "name TEXT PRIMARY KEY, url TEXT NOT NULL, "
+                "interval_minutes INTEGER NOT NULL CHECK(interval_minutes >= 10))"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS feed_seen ("
+                "feed_name TEXT NOT NULL, guid TEXT NOT NULL, "
+                "chatto_message_id TEXT, PRIMARY KEY(feed_name, guid), "
+                "FOREIGN KEY(feed_name) REFERENCES feeds(name) ON DELETE CASCADE)"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS feed_pending_attempts ("
+                "feed_name TEXT NOT NULL, guid TEXT NOT NULL, "
+                "article_link TEXT NOT NULL, expected_body TEXT NOT NULL, "
+                "PRIMARY KEY(feed_name, guid), "
+                "FOREIGN KEY(feed_name) REFERENCES feeds(name) ON DELETE CASCADE)"
+            )
+            connection.commit()
+        except (OSError, sqlite3.Error) as exc:
+            if connection is not None:
+                connection.close()
+            raise StateError("could not initialize state database") from exc
+        assert connection is not None
+        self._connection = connection
+
+    def add_feed(self, name: str, url: str, interval_minutes: int) -> Feed:
+        feed = Feed(name, url, interval_minutes)
+        try:
+            with self._connection:
+                self._connection.execute(
+                    "INSERT INTO feeds (name, url, interval_minutes) VALUES (?, ?, ?)",
+                    (feed.name, feed.url, feed.interval_minutes),
+                )
+        except sqlite3.IntegrityError as exc:
+            if self._connection.execute(
+                "SELECT 1 FROM feeds WHERE name = ?", (feed.name,)
+            ).fetchone():
+                raise FeedExistsError(f"feed already exists: {feed.name}") from exc
+            raise StateError("invalid feed definition") from exc
+        except sqlite3.Error as exc:
+            raise StateError("could not add feed") from exc
+        return feed
+
+    def list_feeds(self) -> list[Feed]:
+        try:
+            rows = self._connection.execute(
+                "SELECT name, url, interval_minutes FROM feeds ORDER BY name"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise StateError("could not list feeds") from exc
+        return [Feed(*row) for row in rows]
+
+    def get_feed(self, name: str) -> Feed:
+        try:
+            row = self._connection.execute(
+                "SELECT name, url, interval_minutes FROM feeds WHERE name = ?",
+                (name,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise StateError("could not find feed") from exc
+        if row is None:
+            raise FeedNotFoundError(f"feed not found: {name}")
+        return Feed(*row)
+
+    def delete_feed(self, name: str) -> None:
+        try:
+            with self._connection:
+                pending = self._connection.execute(
+                    "SELECT EXISTS(SELECT 1 FROM feed_pending_attempts "
+                    "WHERE feed_name = ?)",
+                    (name,),
+                ).fetchone()
+                if pending is not None and bool(pending[0]):
+                    raise StateError("cannot delete feed with a pending post")
+                cursor = self._connection.execute(
+                    "DELETE FROM feeds WHERE name = ?", (name,)
+                )
+        except StateError:
+            raise
+        except sqlite3.Error as exc:
+            raise StateError("could not delete feed") from exc
+        if cursor.rowcount == 0:
+            raise FeedNotFoundError(f"feed not found: {name}")
+
+    def contains(self, feed_name: str, guid: str) -> bool:
+        try:
+            row = self._connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM feed_seen "
+                "WHERE feed_name = ? AND guid = ?)",
+                (feed_name, guid),
+            ).fetchone()
+            return row is not None and bool(row[0])
+        except sqlite3.Error as exc:
+            raise StateError("could not read feed history") from exc
+
+    def mark_seen(
+        self, feed_name: str, guid: str, message_id: str | None = None
+    ) -> None:
+        try:
+            with self._connection:
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO feed_seen "
+                    "(feed_name, guid, chatto_message_id) VALUES (?, ?, ?)",
+                    (feed_name, guid, message_id),
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not record feed history") from exc
+
+    def pending_attempts(
+        self, feed_name: str | None = None
+    ) -> list[FeedPendingAttempt]:
+        try:
+            if feed_name is None:
+                rows = self._connection.execute(
+                    "SELECT feed_name, guid, article_link, expected_body "
+                    "FROM feed_pending_attempts ORDER BY rowid"
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    "SELECT feed_name, guid, article_link, expected_body "
+                    "FROM feed_pending_attempts WHERE feed_name = ? ORDER BY rowid",
+                    (feed_name,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise StateError("could not read pending feed posts") from exc
+        return [FeedPendingAttempt(*row) for row in rows]
+
+    def begin_attempt(
+        self, feed_name: str, guid: str, article_link: str, expected_body: str
+    ) -> None:
+        try:
+            with self._connection:
+                self._connection.execute(
+                    "INSERT INTO feed_pending_attempts "
+                    "(feed_name, guid, article_link, expected_body) "
+                    "VALUES (?, ?, ?, ?)",
+                    (feed_name, guid, article_link, expected_body),
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not record pending feed post") from exc
+
+    def discard_attempt(self, feed_name: str, guid: str) -> None:
+        try:
+            with self._connection:
+                self._connection.execute(
+                    "DELETE FROM feed_pending_attempts "
+                    "WHERE feed_name = ? AND guid = ?",
+                    (feed_name, guid),
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not discard pending feed post") from exc
+
+    def confirm(self, feed_name: str, guid: str, message_id: str) -> None:
+        try:
+            with self._connection:
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO feed_seen "
+                    "(feed_name, guid, chatto_message_id) VALUES (?, ?, ?)",
+                    (feed_name, guid, message_id),
+                )
+                self._connection.execute(
+                    "DELETE FROM feed_pending_attempts "
+                    "WHERE feed_name = ? AND guid = ?",
+                    (feed_name, guid),
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not confirm feed post") from exc
 
     def close(self) -> None:
         self._connection.close()

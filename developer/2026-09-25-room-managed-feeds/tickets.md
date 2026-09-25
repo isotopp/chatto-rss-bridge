@@ -34,6 +34,11 @@ Behavior and public interface:
 
 Done when the state layer's behavior is covered without network access.
 
+Completed: `FeedStore` persists named feed definitions and per-feed seen and
+pending records. Tests cover reopen persistence, overlapping GUIDs, duplicate
+and unknown feed errors, deletion and re-add, pending-delete protection, and
+the absence of legacy history import.
+
 ## 3. Add a feed with one proof post
 
 Behavior and public interface:
