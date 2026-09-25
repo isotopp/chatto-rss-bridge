@@ -8,6 +8,9 @@ from xml.etree import ElementTree
 
 import httpx
 
+MAX_FEED_BYTES = 5 * 1024 * 1024
+FEED_REQUEST_TIMEOUT_SECONDS = 15.0
+
 
 class FeedError(RuntimeError):
     pass
@@ -47,14 +50,23 @@ def _plain_text(description: str) -> str:
 
 def fetch_episodes(client: httpx.Client, source: str) -> list[Episode]:
     try:
-        response = client.get(source)
+        with client.stream(
+            "GET", source, timeout=FEED_REQUEST_TIMEOUT_SECONDS
+        ) as response:
+            if not response.is_success:
+                raise FeedError(
+                    f"RSS feed request returned HTTP {response.status_code}"
+                )
+            content = bytearray()
+            for chunk in response.iter_bytes():
+                if len(content) + len(chunk) > MAX_FEED_BYTES:
+                    raise FeedError("RSS feed response is too large")
+                content.extend(chunk)
     except httpx.HTTPError as exc:
         raise FeedError("RSS feed request failed") from exc
-    if not response.is_success:
-        raise FeedError(f"RSS feed request returned HTTP {response.status_code}")
 
     try:
-        root = ElementTree.fromstring(response.content)
+        root = ElementTree.fromstring(content)
     except ElementTree.ParseError as exc:
         raise FeedError("RSS feed returned invalid XML") from exc
     if root.tag != "rss":

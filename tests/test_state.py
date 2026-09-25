@@ -1,8 +1,10 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from chatto_rss_bridge.state import (
+    Feed,
     FeedExistsError,
     FeedNotFoundError,
     FeedPendingAttempt,
@@ -151,5 +153,62 @@ def test_named_feed_store_does_not_import_legacy_seen_history(tmp_path: Path) ->
         store.add_feed("briefing", "https://example.test/rss", 10)
         assert store.list_feeds()[0].name == "briefing"
         assert not store.contains("briefing", "legacy-guid")
+    finally:
+        store.close()
+
+
+def test_preparing_feed_keeps_proof_and_initial_seen_set_until_activation(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.db"
+    store = FeedStore(path)
+    store.prepare_feed(
+        "briefing",
+        "https://example.test/rss",
+        15,
+        ["older-guid", "proof-guid"],
+        "proof-guid",
+        "https://example.test/latest",
+        "Latest article",
+    )
+    assert store.list_feeds() == []
+    assert store.contains("briefing", "older-guid")
+    assert store.pending_attempts("briefing") == [
+        FeedPendingAttempt(
+            "briefing",
+            "proof-guid",
+            "https://example.test/latest",
+            "Latest article",
+        )
+    ]
+    store.close()
+
+    reopened = FeedStore(path)
+    try:
+        assert reopened.list_feeds() == []
+        assert reopened.contains("briefing", "proof-guid")
+        reopened.complete_feed_add("briefing", "proof-guid", "chatto-message-1")
+        assert reopened.list_feeds()[0].active
+        assert reopened.pending_attempts("briefing") == []
+    finally:
+        reopened.close()
+
+
+def test_feed_store_migrates_feed_definitions_created_by_ticket_two(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.db"
+    with sqlite3.connect(path) as database:
+        database.execute(
+            "CREATE TABLE feeds (name TEXT PRIMARY KEY, url TEXT NOT NULL, "
+            "interval_minutes INTEGER NOT NULL CHECK(interval_minutes >= 10))"
+        )
+        database.execute(
+            "INSERT INTO feeds VALUES ('briefing', 'https://example.test/rss', 15)"
+        )
+
+    store = FeedStore(path)
+    try:
+        assert store.list_feeds() == [Feed("briefing", "https://example.test/rss", 15)]
     finally:
         store.close()

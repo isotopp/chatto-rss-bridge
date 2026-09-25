@@ -11,7 +11,7 @@ from .chatto import (
     search_messages,
 )
 from .config import Config
-from .state import PendingAttempt
+from .state import FeedPendingAttempt, PendingAttempt
 
 _NON_MESSAGE_EVENTS = {
     "roomCreated",
@@ -28,7 +28,9 @@ _NON_MESSAGE_EVENTS = {
 
 
 def reconcile_pending(
-    client: httpx.Client, config: Config, attempt: PendingAttempt
+    client: httpx.Client,
+    config: Config,
+    attempt: PendingAttempt | FeedPendingAttempt,
 ) -> str | None:
     viewer_id = get_viewer_id(client, config)
     try:
@@ -41,7 +43,10 @@ def reconcile_pending(
 
 
 def _search_for_message(
-    client: httpx.Client, config: Config, attempt: PendingAttempt, viewer_id: str
+    client: httpx.Client,
+    config: Config,
+    attempt: PendingAttempt | FeedPendingAttempt,
+    viewer_id: str,
 ) -> str | None:
     cursor = None
     cursors: set[str] = set()
@@ -72,7 +77,10 @@ def _search_for_message(
 
 
 def _scan_timeline(
-    client: httpx.Client, config: Config, attempt: PendingAttempt, viewer_id: str
+    client: httpx.Client,
+    config: Config,
+    attempt: PendingAttempt | FeedPendingAttempt,
+    viewer_id: str,
 ) -> str | None:
     initial = _timeline_page(get_room_events(client, config))
     message_id = _page_match(

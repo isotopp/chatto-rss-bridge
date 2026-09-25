@@ -45,7 +45,8 @@ Behavior and public interface:
 
 - `add <feedname> <url> <minutes>` rejects malformed names or URLs, intervals
   below 10 minutes, duplicate names, invalid feeds, and empty feeds without
-  activating a feed.
+  activating a feed. Names are 1 to 64 ASCII letters, digits, `_`, or `-`,
+  starting with a letter or digit.
 - A valid add posts the newest item by publication time, confirms or
   reconciles that post, marks every item in the initial snapshot seen, and
   activates the feed at the requested interval.
@@ -54,6 +55,11 @@ Behavior and public interface:
 
 Done when controlled Chatto and RSS responses exercise confirmed, rejected,
 and uncertain proof delivery.
+
+Completed: `feed_service.add_feed` validates feed input, fetches at most a
+5 MiB RSS document with a 15 second timeout, posts the newest item, and only
+activates the feed after confirmation. Pending proof posts preserve the
+initial GUID snapshot and are reconciled before any retry.
 
 ## 4. Poll active feeds independently
 
