@@ -6,7 +6,7 @@ import pytest
 
 from chatto_rss_bridge.chatto import RejectedChattoError, UncertainChattoError
 from chatto_rss_bridge.config import Config
-from chatto_rss_bridge.feed_service import add_feed
+from chatto_rss_bridge.feed_service import add_feed, check_due_feeds
 from chatto_rss_bridge.reconciliation import ReconciliationError
 from chatto_rss_bridge.rss import FeedError, fetch_episodes
 from chatto_rss_bridge.state import FeedExistsError, FeedStore
@@ -304,3 +304,118 @@ def test_rss_response_larger_than_limit_is_rejected(monkeypatch) -> None:
         pytest.raises(FeedError, match="too large"),
     ):
         fetch_episodes(client, FEED_URL)
+
+
+def test_due_feeds_keep_overlapping_guids_and_intervals_independent(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "state.db"
+    config = _config(state_path)
+    store = FeedStore(state_path)
+    store.add_feed("alpha", "https://feed.example.test/a.xml", 10)
+    store.add_feed("beta", "https://feed.example.test/b.xml", 20)
+    posted: list[str] = []
+    fetched: list[str] = []
+    xml = b"""<rss version="2.0"><channel><item>
+      <title>Shared GUID</title><link>https://example.test/shared</link>
+      <description>Same GUID in two feeds.</description><guid>shared-guid</guid>
+      <pubDate>Thu, 24 Sep 2026 07:05:03 +0200</pubDate>
+    </item></channel></rss>"""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            fetched.append(str(request.url))
+            return httpx.Response(200, content=xml)
+        posted.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={"message": {"id": f"message-{len(posted)}"}})
+
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert check_due_feeds(client, config, store, now=1_000) == {
+                "alpha": None,
+                "beta": None,
+            }
+        assert len(posted) == 2
+        assert store.contains("alpha", "shared-guid")
+        assert store.contains("beta", "shared-guid")
+    finally:
+        store.close()
+
+    reopened = FeedStore(state_path)
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert check_due_feeds(client, config, reopened, now=1_599) == {}
+            assert check_due_feeds(client, config, reopened, now=1_600) == {
+                "alpha": None
+            }
+        assert fetched == [
+            "https://feed.example.test/a.xml",
+            "https://feed.example.test/b.xml",
+            "https://feed.example.test/a.xml",
+        ]
+        assert len(posted) == 2
+    finally:
+        reopened.close()
+
+
+def test_failed_feed_does_not_stop_others_and_is_retried_after_its_interval(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "state.db"
+    config = _config(state_path)
+    store = FeedStore(state_path)
+    store.add_feed("alpha", "https://feed.example.test/a.xml", 10)
+    store.add_feed("beta", "https://feed.example.test/b.xml", 20)
+    checked: list[str] = []
+    xml = b"""<rss version="2.0"><channel><item>
+      <title>Healthy article</title><link>https://example.test/healthy</link>
+      <description>Healthy summary.</description><guid>healthy-guid</guid>
+      <pubDate>Thu, 24 Sep 2026 07:05:03 +0200</pubDate>
+    </item></channel></rss>"""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            checked.append(str(request.url))
+            if request.url.path.endswith("a.xml"):
+                return httpx.Response(503)
+            return httpx.Response(200, content=xml)
+        return httpx.Response(200, json={"message": {"id": "healthy-message"}})
+
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            first = check_due_feeds(client, config, store, now=1_000)
+            assert first["alpha"] is not None
+            assert first["beta"] is None
+            assert check_due_feeds(client, config, store, now=1_599) == {}
+            second = check_due_feeds(client, config, store, now=1_600)
+        assert second["alpha"] is not None
+        assert checked == [
+            "https://feed.example.test/a.xml",
+            "https://feed.example.test/b.xml",
+            "https://feed.example.test/a.xml",
+        ]
+        assert store.contains("beta", "healthy-guid")
+        assert not store.contains("alpha", "healthy-guid")
+    finally:
+        store.close()
+
+
+def test_poll_posts_unseen_items_oldest_first(tmp_path: Path) -> None:
+    store = FeedStore(tmp_path / "state.db")
+    store.add_feed("briefing", FEED_URL, 10)
+    posted: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, content=FEED_XML)
+        posted.append(json.loads(request.content)["body"].splitlines()[0])
+        return httpx.Response(200, json={"message": {"id": f"message-{len(posted)}"}})
+
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert check_due_feeds(
+                client, _config(tmp_path / "state.db"), store, now=1_000
+            ) == {"briefing": None}
+        assert posted == ["Older article", "Newest article"]
+    finally:
+        store.close()

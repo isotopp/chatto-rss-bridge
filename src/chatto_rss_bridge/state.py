@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ class Feed:
     url: str
     interval_minutes: int
     active: bool = True
+    next_poll_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -196,7 +198,8 @@ class FeedStore:
                 "CREATE TABLE IF NOT EXISTS feeds ("
                 "name TEXT PRIMARY KEY, url TEXT NOT NULL, "
                 "interval_minutes INTEGER NOT NULL CHECK(interval_minutes >= 10), "
-                "active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)))"
+                "active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)), "
+                "next_poll_at REAL)"
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(feeds)")}
             if "active" not in columns:
@@ -204,6 +207,8 @@ class FeedStore:
                     "ALTER TABLE feeds ADD COLUMN active INTEGER NOT NULL "
                     "DEFAULT 1 CHECK(active IN (0, 1))"
                 )
+            if "next_poll_at" not in columns:
+                connection.execute("ALTER TABLE feeds ADD COLUMN next_poll_at REAL")
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS feed_seen ("
                 "feed_name TEXT NOT NULL, guid TEXT NOT NULL, "
@@ -230,8 +235,9 @@ class FeedStore:
         try:
             with self._connection:
                 self._connection.execute(
-                    "INSERT INTO feeds (name, url, interval_minutes, active) "
-                    "VALUES (?, ?, ?, 1)",
+                    "INSERT INTO feeds "
+                    "(name, url, interval_minutes, active, next_poll_at) "
+                    "VALUES (?, ?, ?, 1, NULL)",
                     (feed.name, feed.url, feed.interval_minutes),
                 )
         except sqlite3.IntegrityError as exc:
@@ -247,24 +253,25 @@ class FeedStore:
     def list_feeds(self) -> list[Feed]:
         try:
             rows = self._connection.execute(
-                "SELECT name, url, interval_minutes, active FROM feeds "
+                "SELECT name, url, interval_minutes, active, next_poll_at FROM feeds "
                 "WHERE active = 1 ORDER BY name"
             ).fetchall()
         except sqlite3.Error as exc:
             raise StateError("could not list feeds") from exc
-        return [Feed(row[0], row[1], row[2], bool(row[3])) for row in rows]
+        return [Feed(row[0], row[1], row[2], bool(row[3]), row[4]) for row in rows]
 
     def get_feed(self, name: str) -> Feed:
         try:
             row = self._connection.execute(
-                "SELECT name, url, interval_minutes, active FROM feeds WHERE name = ?",
+                "SELECT name, url, interval_minutes, active, next_poll_at "
+                "FROM feeds WHERE name = ?",
                 (name,),
             ).fetchone()
         except sqlite3.Error as exc:
             raise StateError("could not find feed") from exc
         if row is None:
             raise FeedNotFoundError(f"feed not found: {name}")
-        return Feed(row[0], row[1], row[2], bool(row[3]))
+        return Feed(row[0], row[1], row[2], bool(row[3]), row[4])
 
     def prepare_feed(
         self,
@@ -303,11 +310,19 @@ class FeedStore:
             raise StateError("could not prepare feed") from exc
         return Feed(name, url, interval_minutes, False)
 
-    def complete_feed_add(self, name: str, proof_guid: str, message_id: str) -> None:
+    def complete_feed_add(
+        self,
+        name: str,
+        proof_guid: str,
+        message_id: str,
+        *,
+        now: float | None = None,
+    ) -> None:
         try:
             with self._connection:
                 feed = self._connection.execute(
-                    "SELECT active FROM feeds WHERE name = ?", (name,)
+                    "SELECT active, interval_minutes FROM feeds WHERE name = ?",
+                    (name,),
                 ).fetchone()
                 pending = self._connection.execute(
                     "SELECT 1 FROM feed_pending_attempts "
@@ -316,6 +331,7 @@ class FeedStore:
                 ).fetchone()
                 if feed is None or feed[0] or pending is None:
                     raise StateError("feed add has no matching pending proof post")
+                next_poll_at = (time.time() if now is None else now) + feed[1] * 60
                 self._connection.execute(
                     "INSERT INTO feed_seen (feed_name, guid, chatto_message_id) "
                     "VALUES (?, ?, ?) ON CONFLICT(feed_name, guid) DO UPDATE SET "
@@ -329,7 +345,8 @@ class FeedStore:
                     (name, proof_guid),
                 )
                 self._connection.execute(
-                    "UPDATE feeds SET active = 1 WHERE name = ?", (name,)
+                    "UPDATE feeds SET active = 1, next_poll_at = ? WHERE name = ?",
+                    (next_poll_at, name),
                 )
         except StateError:
             raise
@@ -359,6 +376,31 @@ class FeedStore:
             raise
         except sqlite3.Error as exc:
             raise StateError("could not cancel feed add") from exc
+
+    def due_feeds(self, now: float) -> list[Feed]:
+        try:
+            rows = self._connection.execute(
+                "SELECT name, url, interval_minutes, active, next_poll_at FROM feeds "
+                "WHERE active = 1 AND (next_poll_at IS NULL OR next_poll_at <= ?) "
+                "ORDER BY next_poll_at, name",
+                (now,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise StateError("could not list due feeds") from exc
+        return [Feed(row[0], row[1], row[2], bool(row[3]), row[4]) for row in rows]
+
+    def mark_checked(self, name: str, now: float) -> None:
+        try:
+            with self._connection:
+                cursor = self._connection.execute(
+                    "UPDATE feeds SET next_poll_at = ? + interval_minutes * 60 "
+                    "WHERE name = ? AND active = 1",
+                    (now, name),
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not schedule next feed check") from exc
+        if cursor.rowcount == 0:
+            raise FeedNotFoundError(f"feed not found: {name}")
 
     def delete_feed(self, name: str) -> None:
         try:

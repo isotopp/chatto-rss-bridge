@@ -212,3 +212,26 @@ def test_feed_store_migrates_feed_definitions_created_by_ticket_two(
         assert store.list_feeds() == [Feed("briefing", "https://example.test/rss", 15)]
     finally:
         store.close()
+
+
+def test_each_feed_due_time_survives_reopening_and_uses_its_own_interval(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.db"
+    store = FeedStore(path)
+    store.add_feed("alpha", "https://example.test/a.xml", 10)
+    store.add_feed("beta", "https://example.test/b.xml", 20)
+    store.mark_checked("alpha", 1_000)
+    store.mark_checked("beta", 1_000)
+    store.close()
+
+    reopened = FeedStore(path)
+    try:
+        assert reopened.due_feeds(1_599) == []
+        assert [feed.name for feed in reopened.due_feeds(1_600)] == ["alpha"]
+        assert [feed.name for feed in reopened.due_feeds(2_200)] == [
+            "alpha",
+            "beta",
+        ]
+    finally:
+        reopened.close()

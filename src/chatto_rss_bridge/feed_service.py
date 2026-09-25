@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import re
+import time
 from urllib.parse import urlsplit
 
 import httpx
 
-from .chatto import RejectedChattoError, post_root_message
+from .chatto import (
+    ChattoError,
+    ReconciliationError,
+    RejectedChattoError,
+    post_root_message,
+)
 from .config import Config
 from .reconciliation import reconcile_pending
 from .rss import FeedError, fetch_episodes
 from .state import (
+    Feed,
     FeedExistsError,
     FeedNotFoundError,
     FeedPendingAttempt,
@@ -60,6 +67,53 @@ def add_feed(
     if len(pending) != 1:
         raise StateError("feed has no unique pending proof post")
     return _finish_add(client, config, store, pending[0], reconcile_first=True)
+
+
+def check_due_feeds(
+    client: httpx.Client,
+    config: Config,
+    store: FeedStore,
+    *,
+    now: float | None = None,
+) -> dict[str, str | None]:
+    checked_at = time.time() if now is None else now
+    outcomes: dict[str, str | None] = {}
+    for feed in store.due_feeds(checked_at):
+        try:
+            _check_feed(client, config, store, feed)
+            outcomes[feed.name] = None
+        except (FeedError, ChattoError, StateError, ReconciliationError) as exc:
+            outcomes[feed.name] = str(exc)
+        finally:
+            completed_at = checked_at if now is not None else time.time()
+            store.mark_checked(feed.name, completed_at)
+    return outcomes
+
+
+def _check_feed(
+    client: httpx.Client, config: Config, store: FeedStore, feed: Feed
+) -> None:
+    for attempt in store.pending_attempts(feed.name):
+        try:
+            message_id = reconcile_pending(client, config, attempt)
+            if message_id is None:
+                message_id = post_root_message(client, config, attempt.expected_body)
+        except RejectedChattoError:
+            store.discard_attempt(feed.name, attempt.guid)
+            raise
+        store.confirm(feed.name, attempt.guid, message_id)
+
+    for episode in fetch_episodes(client, feed.url):
+        if store.contains(feed.name, episode.guid):
+            continue
+        body = f"{episode.title}\n\n{episode.description}\n\n{episode.link}"
+        store.begin_attempt(feed.name, episode.guid, episode.link, body)
+        try:
+            message_id = post_root_message(client, config, body)
+        except RejectedChattoError:
+            store.discard_attempt(feed.name, episode.guid)
+            raise
+        store.confirm(feed.name, episode.guid, message_id)
 
 
 def _finish_add(

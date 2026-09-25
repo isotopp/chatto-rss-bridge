@@ -75,6 +75,11 @@ Behavior and public interface:
 Done when checks of two feeds with overlapping GUIDs and different intervals
 show independent results.
 
+Completed: `check_due_feeds` processes due feeds separately, posts unseen
+articles oldest first, and records the next due time in SQLite after each
+attempt. Failed feeds retain pending and seen state, report an error, and do
+not block other feeds.
+
 ## 5. Parse and answer room commands
 
 Behavior and public interface:
