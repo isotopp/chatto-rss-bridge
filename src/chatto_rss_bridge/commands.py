@@ -5,7 +5,13 @@ from typing import Any
 
 import httpx
 
-from .chatto import AuthorizationError, ChattoError, get_user_roles, post_reply_message
+from .chatto import (
+    AuthorizationError,
+    ChattoError,
+    ReconciliationError,
+    get_user_roles,
+    post_reply_message,
+)
 from .config import Config
 from .feed_service import add_feed
 from .rss import FeedError
@@ -27,6 +33,8 @@ def handle_message(
         return False
 
     event_id, actor_id, message, name, args = command
+    if not store.claim_command(event_id):
+        return True
     if name in {"add", "list", "delete"}:
         try:
             roles = get_user_roles(client, config, actor_id)
@@ -132,7 +140,13 @@ def _execute(
                 url=args[1],
                 interval_minutes=interval,
             )
-        except (ValueError, ChattoError, FeedError, StateError) as exc:
+        except (
+            ValueError,
+            ChattoError,
+            FeedError,
+            ReconciliationError,
+            StateError,
+        ) as exc:
             return f"Could not add feed: {exc}"
     if name == "delete":
         if len(args) != 1:

@@ -235,3 +235,21 @@ def test_each_feed_due_time_survives_reopening_and_uses_its_own_interval(
         ]
     finally:
         reopened.close()
+
+
+def test_realtime_cursor_and_command_claim_survive_reopening(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    store = FeedStore(path)
+    assert store.resume_cursor() is None
+    assert store.claim_command("command-event")
+    store.save_resume_cursor("resume-position")
+    store.close()
+
+    reopened = FeedStore(path)
+    try:
+        assert reopened.resume_cursor() == "resume-position"
+        assert not reopened.claim_command("command-event")
+        reopened.clear_resume_cursor()
+        assert reopened.resume_cursor() is None
+    finally:
+        reopened.close()

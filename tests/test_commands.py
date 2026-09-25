@@ -307,6 +307,44 @@ def test_delete_command_removes_feed_and_reports_unknown_name(tmp_path: Path) ->
         store.close()
 
 
+def test_replayed_command_event_is_not_executed_twice(tmp_path: Path) -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        role_response = _role_response(request)
+        if role_response is not None:
+            return role_response
+        return httpx.Response(200, json={"message": {"id": "reply-id"}})
+
+    store = FeedStore(tmp_path / "state.db")
+    store.add_feed("briefing", "https://feed.example.test/rss", 20)
+    event = _body_event("@rss-bot delete briefing")
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert handle_message(
+                client,
+                _config(tmp_path / "state.db"),
+                store,
+                bot_user_id="bot-user",
+                event=event,
+            )
+            assert handle_message(
+                client,
+                _config(tmp_path / "state.db"),
+                store,
+                bot_user_id="bot-user",
+                event=event,
+            )
+
+        assert store.list_feeds() == []
+        assert len(requests) == 2
+        assert requests[0].url.path.endswith("UserService/GetUser")
+        assert requests[1].url.path.endswith("MessageService/CreateMessage")
+    finally:
+        store.close()
+
+
 def test_add_command_posts_proof_then_replies_in_command_thread(tmp_path: Path) -> None:
     requests: list[dict[str, Any]] = []
     feed_xml = b"""<rss version="2.0"><channel><item>

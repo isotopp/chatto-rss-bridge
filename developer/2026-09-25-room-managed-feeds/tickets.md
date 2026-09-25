@@ -134,6 +134,15 @@ Behavior and public interface:
 Done when a controlled disconnect/replay and a restart preserve feed checks
 and avoid repeated commands.
 
+Completed: `python -m chatto_rss_bridge.service` runs an async realtime
+listener alongside the persisted feed scheduler. Synchronous HTTP and SQLite
+work runs on one worker thread. The listener persists cursors only after
+processing their frames, claims direct-mention event IDs before command side
+effects, reconnects with backoff, and reports cursor-expiry gaps before
+restarting at `LIVE_ONLY`. `SIGINT` and `SIGTERM` close the socket, HTTP
+client, and database. Controlled socket and API responses cover resume,
+replayed command, feed polling, and an expired-cursor gap.
+
 ## 8. Document and package operation
 
 Behavior and public interface:

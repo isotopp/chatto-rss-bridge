@@ -222,6 +222,15 @@ class FeedStore:
                 "PRIMARY KEY(feed_name, guid), "
                 "FOREIGN KEY(feed_name) REFERENCES feeds(name) ON DELETE RESTRICT)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS bridge_state ("
+                "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            # ponytail: retain direct bot-mention IDs for replay safety; prune by age if DB size matters.
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS processed_commands ("
+                "event_id TEXT PRIMARY KEY)"
+            )
             connection.commit()
         except (OSError, sqlite3.Error) as exc:
             if connection is not None:
@@ -259,6 +268,49 @@ class FeedStore:
         except sqlite3.Error as exc:
             raise StateError("could not list feeds") from exc
         return [Feed(row[0], row[1], row[2], bool(row[3]), row[4]) for row in rows]
+
+    def claim_command(self, event_id: str) -> bool:
+        # ponytail: claim before side effects to prefer at-most-once over retrying after a crash.
+        try:
+            with self._connection:
+                cursor = self._connection.execute(
+                    "INSERT OR IGNORE INTO processed_commands (event_id) VALUES (?)",
+                    (event_id,),
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not record command event") from exc
+        return cursor.rowcount == 1
+
+    def resume_cursor(self) -> str | None:
+        try:
+            row = self._connection.execute(
+                "SELECT value FROM bridge_state WHERE key = 'realtime_cursor'"
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise StateError("could not read realtime cursor") from exc
+        return row[0] if row is not None else None
+
+    def save_resume_cursor(self, cursor: str) -> None:
+        if not cursor:
+            raise StateError("realtime cursor must not be empty")
+        try:
+            with self._connection:
+                self._connection.execute(
+                    "INSERT INTO bridge_state (key, value) VALUES ('realtime_cursor', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (cursor,),
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not save realtime cursor") from exc
+
+    def clear_resume_cursor(self) -> None:
+        try:
+            with self._connection:
+                self._connection.execute(
+                    "DELETE FROM bridge_state WHERE key = 'realtime_cursor'"
+                )
+        except sqlite3.Error as exc:
+            raise StateError("could not clear realtime cursor") from exc
 
     def get_feed(self, name: str) -> Feed:
         try:

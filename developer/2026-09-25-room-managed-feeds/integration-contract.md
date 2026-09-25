@@ -24,7 +24,10 @@ to the bot's viewer user ID and `includes_viewer = true`. Role, `here`, and
 to the configured room, skip the bot's own messages and channel echoes, and
 deduplicate by event ID. A missing `body_plaintext` is not a command. The
 synthetic decoded event in `tests/fixtures/chatto_direct_mention.json` records
-the expected shape; it is not a captured live message.
+the expected shape; it is not a captured live message. The listener keeps a
+wire-compatible protobuf subset in `src/chatto_rss_bridge/realtime.proto`;
+`tests/fixtures/chatto_realtime_mention.hex` is a synthetic binary frame that
+checks its field numbers and decoding without a live Chatto connection.
 
 ## Reply
 

@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package chatto.realtime.v1;
+
+// Wire-compatible subset of Chatto's realtime.proto and events.proto.
+// Keep field numbers and names aligned with the deployed contract recorded in
+// developer/2026-09-25-room-managed-feeds/integration-contract.md.
+message RealtimeSubscribe {
+  uint32 protocol_version = 1;
+  optional string bearer_token = 2;
+  optional string resume_cursor = 3;
+  RealtimeInitialState initial_state = 4;
+}
+
+enum RealtimeInitialState {
+  REALTIME_INITIAL_STATE_UNSPECIFIED = 0;
+  REALTIME_INITIAL_STATE_LIVE_ONLY = 1;
+  REALTIME_INITIAL_STATE_SNAPSHOT = 2;
+}
+
+message RealtimeServerFrame {
+  oneof frame {
+    RealtimeEvent event = 1;
+    RealtimeHeartbeat heartbeat = 2;
+    RealtimeClose close = 3;
+    RealtimeCaughtUp caught_up = 4;
+  }
+}
+
+message RealtimeEvent {
+  string id = 1;
+  optional string actor_id = 3;
+  optional string cursor = 4;
+  oneof event {
+    MessagePostedEvent message_posted = 24;
+  }
+}
+
+message MessagePostedEvent {
+  string room_id = 1;
+  string in_reply_to = 2;
+  string thread_root_event_id = 3;
+  string echo_of_event_id = 5;
+  repeated MessageMention mentions = 7;
+  optional string body_plaintext = 8;
+}
+
+message MessageMention {
+  oneof cause {
+    DirectUserMention direct = 2;
+  }
+  bool includes_viewer = 6;
+}
+
+message DirectUserMention {
+  string user_id = 1;
+}
+
+message RealtimeHeartbeat {
+  optional string cursor = 1;
+}
+
+message RealtimeCaughtUp {
+  string cursor = 1;
+  RealtimeRecovery recovery = 2;
+}
+
+enum RealtimeRecovery {
+  REALTIME_RECOVERY_UNSPECIFIED = 0;
+  REALTIME_RECOVERY_RESUMED = 1;
+  REALTIME_RECOVERY_SNAPSHOT = 2;
+  REALTIME_RECOVERY_LIVE_ONLY = 3;
+}
+
+message RealtimeClose {
+  RealtimeCloseCode code = 1;
+  string message = 2;
+  bool reconnect = 3;
+  RealtimeRetryAfter retry_after = 4;
+}
+
+// Wire-compatible subset of google.protobuf.Duration.
+message RealtimeRetryAfter {
+  int64 seconds = 1;
+  int32 nanos = 2;
+}
+
+enum RealtimeCloseCode {
+  REALTIME_CLOSE_CODE_UNSPECIFIED = 0;
+  REALTIME_CLOSE_CODE_INVALID_REQUEST = 1;
+  REALTIME_CLOSE_CODE_UNSUPPORTED_PROTOCOL = 2;
+  REALTIME_CLOSE_CODE_TEMPORARILY_UNAVAILABLE = 3;
+  REALTIME_CLOSE_CODE_AUTHENTICATION_REQUIRED = 4;
+  REALTIME_CLOSE_CODE_SESSION_RENEWAL_REQUIRED = 5;
+  REALTIME_CLOSE_CODE_RESYNC_REQUIRED = 6;
+  REALTIME_CLOSE_CODE_SESSION_TERMINATED = 7;
+  REALTIME_CLOSE_CODE_PRIVILEGED_MODE_EXPIRED = 8;
+}
