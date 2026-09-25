@@ -29,7 +29,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [project.scripts]
-chatto-rss-bridge = "chatto_rss_bridge:main"
+chatto-rss-bridge = "chatto_rss_bridge.service:main"
 
 [build-system]
 requires = ["uv_build>=0.9.27,<0.10.0"]

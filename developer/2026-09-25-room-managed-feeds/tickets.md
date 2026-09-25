@@ -156,6 +156,11 @@ Behavior and public interface:
 Done when an operator can install, start, and inspect the service from the
 README without guessing its configuration or handling secrets in logs.
 
+Completed: `chatto-rss-bridge` now launches the long-running service, rejects
+the old one-shot flags, and no longer requires `BOT_RSS_SOURCE`. `sample.env`
+and `README.md` cover role setup, room commands, manual Presseschau addition,
+SQLite state, recovery, and a restartable systemd service without a timer.
+
 ## Re-add policy
 
 Deleting a feed removes its active definition and confirmed history after any

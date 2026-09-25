@@ -141,3 +141,17 @@ def test_config_requires_a_bot_bridge_role(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="BOT_BRIDGE_ROLE"):
         Config.load(cwd=tmp_path)
+
+
+def test_service_config_does_not_require_a_single_legacy_feed(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "BOT_API_KEY=test-key\n"
+        "BOT_ROOM_ID=room-1\n"
+        "BOT_BRIDGE_ROLE=rss-bot-operator\n"
+        "CHATTO_BASE_URL=https://chatto.example\n",
+        encoding="utf-8",
+    )
+
+    config = Config.load(cwd=tmp_path)
+
+    assert config.rss_source == ""

@@ -41,7 +41,6 @@ class Config:
             "BOT_API_KEY": values.get("BOT_API_KEY"),
             "BOT_ROOM_ID": values.get("BOT_ROOM_ID"),
             "BOT_BRIDGE_ROLE": values.get("BOT_BRIDGE_ROLE"),
-            "BOT_RSS_SOURCE": values.get("BOT_RSS_SOURCE"),
             "CHATTO_BASE_URL": values.get("CHATTO_BASE_URL"),
         }
         cleaned = {
@@ -55,9 +54,13 @@ class Config:
         api_key = cleaned["BOT_API_KEY"]
         room_id = cleaned["BOT_ROOM_ID"]
         bot_bridge_role = cleaned["BOT_BRIDGE_ROLE"]
-        rss_source = cleaned["BOT_RSS_SOURCE"]
+        legacy_rss_source = values.get("BOT_RSS_SOURCE")
+        rss_source = (
+            legacy_rss_source.strip() if isinstance(legacy_rss_source, str) else ""
+        )
         chatto_base_url = cleaned["CHATTO_BASE_URL"].rstrip("/")
-        _validate_url("BOT_RSS_SOURCE", rss_source, allow_path=True)
+        if rss_source:
+            _validate_url("BOT_RSS_SOURCE", rss_source, allow_path=True)
         _validate_url("CHATTO_BASE_URL", chatto_base_url, allow_path=False)
         return cls(
             api_key,

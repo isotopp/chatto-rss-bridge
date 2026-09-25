@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import signal
@@ -310,6 +311,7 @@ def _install_shutdown_handlers(
 
 
 def main() -> int:
+    argparse.ArgumentParser(prog="chatto-rss-bridge").parse_args()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
