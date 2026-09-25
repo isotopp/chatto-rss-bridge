@@ -94,6 +94,34 @@ def get_room_events(
 
 
 def post_root_message(client: httpx.Client, config: Config, body: str) -> str:
+    return _post_message(
+        client,
+        config,
+        {"roomId": config.room_id, "body": body},
+    )
+
+
+def post_reply_message(
+    client: httpx.Client,
+    config: Config,
+    body: str,
+    *,
+    thread_root_event_id: str,
+    in_reply_to: str,
+) -> str:
+    return _post_message(
+        client,
+        config,
+        {
+            "roomId": config.room_id,
+            "body": body,
+            "threadRootEventId": thread_root_event_id,
+            "inReplyTo": in_reply_to,
+        },
+    )
+
+
+def _post_message(client: httpx.Client, config: Config, payload: dict[str, str]) -> str:
     url = (
         config.chatto_base_url
         + "/api/connect/chatto.api.v1.MessageService/CreateMessage"
@@ -102,7 +130,7 @@ def post_root_message(client: httpx.Client, config: Config, body: str) -> str:
         response = client.post(
             url,
             headers={"Authorization": f"Bearer {config.api_key}"},
-            json={"roomId": config.room_id, "body": body},
+            json=payload,
         )
     except httpx.HTTPError as exc:
         raise UncertainChattoError("Chatto message request failed") from exc

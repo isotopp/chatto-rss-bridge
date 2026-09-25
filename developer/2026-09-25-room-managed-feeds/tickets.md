@@ -95,6 +95,12 @@ Behavior and public interface:
 Done when the command handler is testable with message and API fixtures, with
 no live Chatto connection.
 
+Completed: `commands.handle_message` accepts only direct mention events for
+the configured room, ignores self-authored and echoed messages, handles the
+four commands with exact argument counts, and replies against the source
+message's thread root. API and RSS behavior is covered with controlled
+responses.
+
 ## 6. Authorize feed commands
 
 Behavior and public interface:
