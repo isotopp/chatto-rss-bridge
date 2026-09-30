@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -107,6 +108,14 @@ def test_list_command_replies_in_the_message_thread(tmp_path: Path) -> None:
             "requires the rss-bot-operator role",
         ),
         (200, {"user": {"roles": "rss-bot-operator"}}, "Could not verify your role"),
+        (200, {}, "Could not verify your role"),
+        (200, {"user": {}}, "requires the rss-bot-operator role"),
+        (200, {"user": {"roles": [None]}}, "Could not verify your role"),
+        (
+            200,
+            {"user": {"roles": ["RSS-BOT-OPERATOR"]}},
+            "requires the rss-bot-operator role",
+        ),
         (403, {}, "Could not verify your role"),
     ],
 )
@@ -140,6 +149,73 @@ def test_feed_commands_are_denied_without_verified_operator_role(
         reply = json.loads(requests[1].content)
         assert expected in reply["body"]
         assert store.list_feeds()[0].name == "briefing"
+    finally:
+        store.close()
+
+
+def test_target_api_fixtures_produce_the_expected_thread_reply(tmp_path: Path) -> None:
+    fixtures = Path(__file__).parent / "fixtures"
+    event = json.loads((fixtures / "chatto_direct_mention.json").read_text())["event"]
+    reply = json.loads((fixtures / "chatto_thread_reply.json").read_text())
+    store = FeedStore(tmp_path / "state.db")
+    config = replace(_config(tmp_path / "state.db"), room_id="configured-room-id")
+    replies: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer test-api-key"
+        if request.url.path.endswith("UserService/GetUser"):
+            assert json.loads(request.content) == {"userId": "operator-user-id"}
+            return httpx.Response(
+                200,
+                json={
+                    "user": {
+                        "user": {"id": "operator-user-id"},
+                        "roles": ["rss-bot-operator"],
+                    }
+                },
+            )
+        assert request.url.path.endswith("MessageService/CreateMessage")
+        replies.append(json.loads(request.content))
+        return httpx.Response(200, json=reply["response"])
+
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert handle_message(
+                client, config, store, bot_user_id="bot-user-id", event=event
+            )
+        assert replies == [reply["request"]]
+    finally:
+        store.close()
+
+
+def test_role_revocation_denies_the_next_command(tmp_path: Path) -> None:
+    store = FeedStore(tmp_path / "state.db")
+    store.add_feed("briefing", FEED_URL, 15)
+    config = _config(tmp_path / "state.db")
+    roles = ["rss-bot-operator"]
+    replies: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("UserService/GetUser"):
+            assert json.loads(request.content) == {"userId": "operator-user"}
+            return httpx.Response(200, json={"user": {"roles": roles}})
+        replies.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={"message": {"id": f"reply-{len(replies)}"}})
+
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert handle_message(
+                client, config, store, bot_user_id="bot-user", event=_event()
+            )
+            roles.clear()
+            delete = _body_event("@rss-bot delete briefing")
+            delete["id"] = "command-after-revocation"
+            assert handle_message(
+                client, config, store, bot_user_id="bot-user", event=delete
+            )
+        assert "briefing" in replies[0]
+        assert "requires the rss-bot-operator role" in replies[1]
+        assert store.get_feed("briefing").active
     finally:
         store.close()
 
@@ -215,6 +291,15 @@ def test_unrelated_and_non_post_events_are_ignored(tmp_path: Path) -> None:
     edited = {"id": "edited-event", "messageEdited": {"roomId": "room-1"}}
     missing_body = json.loads(json.dumps(base))
     del missing_body["messagePosted"]["bodyPlaintext"]
+    indirect_mentions = []
+    for target in (
+        {"role": {"roleName": "rss-bot-operator"}},
+        {"here": {}},
+        {"all": {}},
+    ):
+        indirect = json.loads(json.dumps(base))
+        indirect["messagePosted"]["mentions"] = [{**target, "includesViewer": True}]
+        indirect_mentions.append(indirect)
 
     store = FeedStore(tmp_path / "state.db")
     try:
@@ -227,6 +312,7 @@ def test_unrelated_and_non_post_events_are_ignored(tmp_path: Path) -> None:
                 echo,
                 edited,
                 missing_body,
+                *indirect_mentions,
             ):
                 assert (
                     handle_message(

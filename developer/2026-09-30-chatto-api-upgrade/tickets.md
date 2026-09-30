@@ -112,6 +112,16 @@ Done when existing coverage and any necessary focused additions demonstrate
 these behaviors with controlled HTTP, WebSocket, RSS, and persistent-state
 inputs. Tests require no network access, live posts, or live service setup.
 
+Completed: source review confirms the JSON fixtures and binary mention fixture
+match beta.10. A command test now consumes the JSON mention/reply fixtures;
+additional cases cover missing or malformed roles, exact role-name matching,
+role revocation on the next command, and indirect mentions. Existing service,
+feed, posting, and state tests cover binary protocol 4, reconnect/replay,
+expired cursors, thread placement, root delivery, and persistent state. No
+runtime or protobuf wire changes were needed for these matching interfaces.
+The protobuf source comment now references this contract. Required checks
+pass: 88 tests.
+
 ## 4. Document the supported release and upgrade operation
 
 Depends on tickets 1 through 3.

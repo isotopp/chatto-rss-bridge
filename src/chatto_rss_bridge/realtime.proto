@@ -3,8 +3,8 @@ syntax = "proto3";
 package chatto.realtime.v1;
 
 // Wire-compatible subset of Chatto's realtime.proto and events.proto.
-// Keep field numbers and names aligned with the deployed contract recorded in
-// developer/2026-09-25-room-managed-feeds/integration-contract.md.
+// Keep field numbers and names aligned with the verified release contract in
+// developer/2026-09-30-chatto-api-upgrade/integration-contract.md.
 message RealtimeSubscribe {
   uint32 protocol_version = 1;
   optional string bearer_token = 2;
