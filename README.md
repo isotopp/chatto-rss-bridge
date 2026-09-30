@@ -4,6 +4,10 @@ Chatto RSS Bridge listens for direct mentions in one Chatto room and checks a
 persistent set of RSS feeds. Manage feeds with room commands; run one
 restartable service instead of a timer.
 
+The supported Chatto target is **0.5.0-beta.10**. Its API contract is verified
+against the release source and exercised with offline tests; see the
+[verified API contract](developer/2026-09-30-chatto-api-upgrade/integration-contract.md).
+
 ## Install
 
 The server needs Python 3.14 or newer and [uv](https://docs.astral.sh/uv/).
@@ -34,10 +38,11 @@ Create a bot account and add it to the destination room:
 4. Create or choose a Chatto role and assign the approved people to it. The
    role name must match `BOT_BRIDGE_ROLE` exactly.
 
-The deployed bot key was verified to read its viewer ID, the configured room's
-events, and users' roles. `UserService/GetUser` role checks do not require
-admin access. Message and thread permissions are still required for the bot's
-normal room work; see the [verified API contract](developer/2026-09-25-room-managed-feeds/integration-contract.md).
+In Chatto 0.5.0-beta.10, `UserService/GetUser` role checks require authentication
+and do not require admin access. Keep broad `message.read` access so the bot
+can check room history when a post's response is lost; interaction-only read
+access cannot establish that a post is absent. Message and thread permissions
+are required for the bot's normal room work.
 
 ## Configure the service
 
@@ -149,3 +154,30 @@ Chatto resume cursors expire. If the service was disconnected too long to
 resume, it logs that a gap may have missed commands and starts listening from
 the current live boundary. Send any important command from that gap again; the
 service never guesses old commands.
+
+## Upgrade an existing service
+
+For an existing room-managed feed installation, stop the service, update the
+checkout and dependencies, and start it again:
+
+```sh
+sudo systemctl stop chatto-rss-bridge.service
+cd /opt/chatto-rss-bridge
+git pull --ff-only
+uv sync --no-dev
+sudo systemctl start chatto-rss-bridge.service
+systemctl status chatto-rss-bridge.service
+journalctl -u chatto-rss-bridge.service
+```
+
+Retain the existing configuration and `.chatto-rss-bridge.db`; saved feeds,
+delivery history, pending posts, and processed command IDs remain effective.
+This upgrade requires no database migration or manual resume-cursor reset.
+If downtime exceeds Chatto's cursor lifetime, the service reports the gap and
+resumes at the live boundary as described above. Pending posts are reconciled
+using the corrected room-history pagination before any retry.
+
+Check the deployed server version and confirm that the bot can authenticate
+and subscribe to realtime events. A live mention/reply and RSS delivery check
+posts messages to the room; perform those as an authorized deployment check.
+Automated compatibility tests use controlled responses and make no live posts.

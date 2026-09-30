@@ -93,7 +93,7 @@ The bridge's wire subset matches the target: server `event`, `heartbeat`,
 and `cursor` are 1, 3, and 4; `message_posted` is 24. Its room ID, reply ID,
 thread root, echo ID, mentions, and optional plaintext are fields 1, 2, 3, 5,
 7, and 8. Direct mention target field 2 contains `user_id` field 1;
-`includes_viewer` is field 6. The added room-kind field can remain outside the
+`includes_viewer` is field 6. The room-kind field can remain outside the
 subset because the bridge filters by its configured room ID.
 
 Only direct mentions of this bot with `includes_viewer = true` trigger commands.

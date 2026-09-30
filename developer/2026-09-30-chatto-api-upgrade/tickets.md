@@ -1,7 +1,7 @@
 # Chatto 0.5-beta.10 API upgrade: ticket plan
 
 This plan covers [US-1](user-stories.md) in implementation order. Status:
-approved for implementation by the user on 2026-09-30; plan committed in `f684b10`.
+completed on 2026-09-30 after user approval; plan committed in `f684b10`.
 The user story is already committed in `dea396a`.
 
 Each code change starts with a failing behavior test using controlled
@@ -141,3 +141,11 @@ Behavior and public interface:
 Done when the README and contract agree with the completed tickets and the
 required project checks pass. Deployment acceptance that posts to Chatto is
 performed separately with explicit authorization.
+
+Completed: `README.md` identifies the supported release, links the verified
+contract, explains the permissions needed for complete reconciliation, and
+documents updating and restarting an existing service while retaining its
+configuration and database. No database migration or manual cursor reset is
+required. Read-only deployment verification and live message acceptance are
+documented separately from offline tests. Final Ruff, formatting, type, and
+test checks pass: 88 tests. No live messages or service setup were performed.
