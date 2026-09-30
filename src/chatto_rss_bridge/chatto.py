@@ -108,9 +108,9 @@ def get_room_events(
 ) -> dict[str, Any]:
     payload: dict[str, object] = {"roomId": config.room_id, "limit": 500}
     if before is not None:
-        payload["cursor"] = {"before": before}
+        payload["before"] = before
     elif after is not None:
-        payload["cursor"] = {"after": after}
+        payload["after"] = after
     return _read_connect_json(client, config, "RoomService/GetRoomEvents", payload)
 
 

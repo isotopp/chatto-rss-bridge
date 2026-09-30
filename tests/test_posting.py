@@ -594,7 +594,8 @@ def test_reliable_timeline_absence_allows_retry_after_all_pages(
             return httpx.Response(200, json={"results": []})
         if request.url.path.endswith("RoomService/GetRoomEvents"):
             payload = json.loads(request.content)
-            if "cursor" not in payload:
+            assert "cursor" not in payload
+            if "before" not in payload:
                 return httpx.Response(
                     200,
                     json={
@@ -607,7 +608,7 @@ def test_reliable_timeline_absence_allows_retry_after_all_pages(
                         }
                     },
                 )
-            assert payload["cursor"] == {"before": "recent-start"}
+            assert payload["before"] == "recent-start"
             return httpx.Response(
                 200,
                 json={

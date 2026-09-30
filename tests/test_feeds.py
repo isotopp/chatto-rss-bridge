@@ -239,6 +239,129 @@ def test_repeated_add_after_lost_confirmation_reconciles_without_duplicate_post(
         store.close()
 
 
+@pytest.mark.parametrize("direction", ["before", "after"])
+@pytest.mark.parametrize("search_status", [200, 503])
+def test_pending_feed_post_is_found_on_a_later_timeline_page_after_restart(
+    tmp_path: Path, direction: str, search_status: int
+) -> None:
+    path = tmp_path / "state.db"
+    body = "Newest article\n\nNewest summary.\n\nhttps://example.test/new"
+    store = FeedStore(path)
+    store.add_feed("briefing", FEED_URL, 15)
+    store.mark_seen("briefing", "old-guid")
+    store.begin_attempt("briefing", "new-guid", "https://example.test/new", body)
+    store.close()
+    pages: list[dict[str, object]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, content=FEED_XML)
+        if request.url.path.endswith("GetViewer"):
+            return httpx.Response(200, json={"user": {"profile": {"id": "bot-user"}}})
+        if request.url.path.endswith("SearchMessages"):
+            return httpx.Response(search_status, json={"results": []})
+        if request.url.path.endswith("GetRoomEvents"):
+            payload = json.loads(request.content)
+            pages.append(payload)
+            assert "cursor" not in payload
+            if len(pages) == 1:
+                assert payload == {"roomId": "room-1", "limit": 500}
+                return httpx.Response(
+                    200,
+                    json={
+                        "page": {
+                            "startCursor": "older-boundary",
+                            "endCursor": "newer-boundary",
+                            "hasOlder": direction == "before",
+                            "hasNewer": direction == "after",
+                        }
+                    },
+                )
+            boundary = "older-boundary" if direction == "before" else "newer-boundary"
+            assert payload == {"roomId": "room-1", "limit": 500, direction: boundary}
+            return httpx.Response(
+                200,
+                json={
+                    "page": {
+                        "events": [
+                            {
+                                "id": "delivered-message",
+                                "actorId": "bot-user",
+                                "messagePosted": {
+                                    "message": {
+                                        "id": "delivered-message",
+                                        "roomId": "room-1",
+                                        "actorId": "bot-user",
+                                        "body": body,
+                                    }
+                                },
+                            }
+                        ]
+                    }
+                },
+            )
+        raise AssertionError(
+            f"unexpected request (including duplicate post): {request.url}"
+        )
+
+    store = FeedStore(path)
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert check_due_feeds(client, _config(path), store, now=100) == {
+                "briefing": None
+            }
+        assert len(pages) == 2
+        assert store.contains("briefing", "new-guid")
+        assert store.pending_attempts("briefing") == []
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "timeline_response",
+    [
+        httpx.Response(503),
+        httpx.Response(200, json={}),
+        httpx.Response(200, json={"page": {"events": "invalid"}}),
+        httpx.Response(200, json={"page": {"hasOlder": True}}),
+        httpx.Response(200, json={"page": {"hasNewer": "invalid"}}),
+        httpx.Response(200, json={"page": {"hasOlder": True, "startCursor": "cycle"}}),
+    ],
+)
+def test_inconclusive_timeline_preserves_pending_feed_post_without_retry(
+    tmp_path: Path, timeline_response: httpx.Response
+) -> None:
+    path = tmp_path / "state.db"
+    store = FeedStore(path)
+    store.add_feed("briefing", FEED_URL, 15)
+    store.begin_attempt(
+        "briefing", "new-guid", "https://example.test/new", "Expected body"
+    )
+    pending = store.pending_attempts("briefing")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("GetViewer"):
+            return httpx.Response(200, json={"user": {"profile": {"id": "bot-user"}}})
+        if request.url.path.endswith("SearchMessages"):
+            return httpx.Response(503)
+        if request.url.path.endswith("GetRoomEvents"):
+            return timeline_response
+        raise AssertionError(
+            f"unexpected request (including duplicate post): {request.url}"
+        )
+
+    try:
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert (
+                check_due_feeds(client, _config(path), store, now=100)["briefing"]
+                is not None
+            )
+        assert store.pending_attempts("briefing") == pending
+        assert not store.contains("briefing", "new-guid")
+    finally:
+        store.close()
+
+
 def test_duplicate_active_feed_add_is_rejected_without_another_proof_post(
     tmp_path: Path,
 ) -> None:

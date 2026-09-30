@@ -76,6 +76,13 @@ Done when controlled HTTP responses reject the old nested cursor shape and
 exercise successful reconciliation on subsequent older and newer pages, plus
 inconclusive reads that must not trigger a duplicate post.
 
+Completed: `get_room_events` sends top-level `before` and `after`. The existing
+negative-read regression now enforces the target request shape. Feed polling
+tests find pending deliveries on older and newer pages after reopening the
+database, with empty or unavailable search, and retain pending state for
+failed, malformed, incomplete, and cyclic timeline reads. Both pagination
+regressions failed before their fixes. Required checks pass: 82 tests.
+
 ## 3. Verify command, delivery, and realtime compatibility
 
 Depends on tickets 1 and 2.
