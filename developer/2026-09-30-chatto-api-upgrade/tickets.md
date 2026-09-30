@@ -1,7 +1,7 @@
 # Chatto 0.5-beta.10 API upgrade: ticket plan
 
 This plan covers [US-1](user-stories.md) in implementation order. Status:
-draft, awaiting user approval before committing this plan or implementation.
+approved for implementation by the user on 2026-09-30; plan committed in `f684b10`.
 The user story is already committed in `dea396a`.
 
 Each code change starts with a failing behavior test using controlled
@@ -49,6 +49,11 @@ Behavior and public interface:
 Done when the contract supports the remaining tickets without guessed API
 details. If verification reveals additional required behavior changes, update
 this plan and obtain approval before implementing them.
+
+Completed: [integration-contract.md](integration-contract.md) records the
+release schemas, authentication and permission evidence, the pagination
+correction, and the remaining deployment acceptance checks. Source verification
+requires no additional API changes beyond the approved plan.
 
 ## 2. Reconcile uncertain posts using valid timeline pagination
 
